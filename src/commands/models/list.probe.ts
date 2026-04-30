@@ -293,16 +293,19 @@ export async function buildProbeTargets(params: {
   options: AuthProbeOptions;
 }): Promise<{ targets: AuthProbeTarget[]; results: AuthProbeResult[] }> {
   const { cfg, agentDir, providers, modelCandidates, options, workspaceDir } = params;
+  const providerFilter = options.provider?.trim();
+  const providerFilterKey = providerFilter ? normalizeProviderId(providerFilter) : null;
+  const externalCliProviderIds = providerFilterKey
+    ? providers.filter((provider) => normalizeProviderId(provider) === providerFilterKey)
+    : providers;
   const store = ensureAuthProfileStore(agentDir, {
     externalCli: externalCliDiscoveryScoped({
       config: cfg,
       allowKeychainPrompt: false,
-      providerIds: providers,
+      providerIds: externalCliProviderIds,
       profileIds: options.profileIds,
     }),
   });
-  const providerFilter = options.provider?.trim();
-  const providerFilterKey = providerFilter ? normalizeProviderId(providerFilter) : null;
   const profileFilter = new Set((options.profileIds ?? []).map((id) => id.trim()).filter(Boolean));
   const refResolveCache: SecretRefResolveCache = {};
   const catalog = await loadModelCatalog({ config: cfg });
