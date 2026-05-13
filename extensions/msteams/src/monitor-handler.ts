@@ -127,6 +127,22 @@ export async function isSigninInvokeAuthorized(
   });
 }
 
+export async function isCardActionInvokeAuthorized(
+  context: MSTeamsTurnContext,
+  deps: MSTeamsMessageHandlerDeps,
+): Promise<boolean> {
+  return isInvokeAuthorized({
+    context,
+    deps,
+    deniedLogs: {
+      dm: "dropping card action invoke (dm sender not allowlisted)",
+      channel: "dropping card action invoke (not in team/channel allowlist)",
+      group: "dropping card action invoke (group sender not allowlisted)",
+    },
+    includeInvokeName: true,
+  });
+}
+
 export function registerMSTeamsHandlers<T extends MSTeamsActivityHandler>(
   handler: T,
   deps: MSTeamsMessageHandlerDeps,

@@ -125,6 +125,8 @@ vi.mock("express", () => {
 const registerMSTeamsHandlers = vi.hoisted(() =>
   vi.fn<RegisterMSTeamsHandlersMock>((handler) => handler),
 );
+const isSigninInvokeAuthorized = vi.hoisted(() => vi.fn(async () => true));
+const isCardActionInvokeAuthorized = vi.hoisted(() => vi.fn(async () => true));
 const loadMSTeamsSdkWithAuth = vi.hoisted(() =>
   vi.fn(async (_creds?: unknown, _options?: unknown) => ({
     app: {
@@ -150,6 +152,8 @@ vi.mock("@microsoft/teams.apps", () => ({
 }));
 
 vi.mock("./monitor-handler.js", () => ({
+  isCardActionInvokeAuthorized,
+  isSigninInvokeAuthorized,
   registerMSTeamsHandlers,
 }));
 
@@ -266,6 +270,8 @@ describe("monitorMSTeamsProvider lifecycle", () => {
     isDangerousNameMatchingEnabled.mockReset().mockReturnValue(false);
     resolveAllowlistMocks.resolveMSTeamsChannelAllowlist.mockReset().mockResolvedValue([]);
     resolveAllowlistMocks.resolveMSTeamsUserAllowlist.mockReset().mockResolvedValue([]);
+    isSigninInvokeAuthorized.mockReset().mockResolvedValue(true);
+    isCardActionInvokeAuthorized.mockReset().mockResolvedValue(true);
     ssoTokenStore.get.mockClear();
     ssoTokenStore.save.mockClear();
     ssoTokenStore.remove.mockClear();
@@ -408,6 +414,7 @@ describe("monitorMSTeamsProvider lifecycle", () => {
     });
 
     await vi.waitFor(() => {
+      expect(isSigninInvokeAuthorized).toHaveBeenCalledTimes(1);
       expect(ssoTokenStore.save).toHaveBeenCalledTimes(2);
     });
     expect(ssoTokenStore.save).toHaveBeenCalledWith(
@@ -426,6 +433,169 @@ describe("monitorMSTeamsProvider lifecycle", () => {
         expiresAt: "2030-01-01T00:00:00Z",
       }),
     );
+
+    abort.abort();
+    await task;
+  });
+
+  it("does not persist SDK SSO signin events when Teams sender policy denies them", async () => {
+    const abort = new AbortController();
+    const cfg = createConfig(0);
+    updateMSTeamsConfig(cfg, {
+      sso: { enabled: true, connectionName: "graph" },
+    });
+    isSigninInvokeAuthorized.mockResolvedValueOnce(false);
+
+    const task = monitorMSTeamsProvider({
+      cfg,
+      runtime: createRuntime(),
+      abortSignal: abort.signal,
+      conversationStore: createStores().conversationStore,
+      pollStore: createStores().pollStore,
+    });
+
+    await vi.waitFor(() => {
+      expect(registerMSTeamsHandlers).toHaveBeenCalled();
+    });
+
+    const sdkResultPromise = loadMSTeamsSdkWithAuth.mock.results[0]?.value;
+    if (!sdkResultPromise) {
+      throw new Error("expected loadMSTeamsSdkWithAuth result");
+    }
+    const app = (await sdkResultPromise).app;
+    const signinHandler = app.event.mock.calls.find(
+      (call: [string, unknown]) => call[0] === "signin",
+    )?.[1];
+    if (typeof signinHandler !== "function") {
+      throw new Error("expected signin event handler");
+    }
+
+    signinHandler({
+      activity: { from: { id: "29:user", aadObjectId: "aad-user" } },
+      token: {
+        connectionName: "graph",
+        token: "delegated-graph-token",
+        expiration: "2030-01-01T00:00:00Z",
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(isSigninInvokeAuthorized).toHaveBeenCalledTimes(1);
+    });
+    expect(ssoTokenStore.save).not.toHaveBeenCalled();
+
+    abort.abort();
+    await task;
+  });
+
+  it("gates poll card votes before recording them", async () => {
+    const abort = new AbortController();
+    const cfg = createConfig(0);
+    const pollStore: MSTeamsPollStore = {
+      createPoll: vi.fn(async () => {}),
+      getPoll: vi.fn(async () => ({
+        id: "poll-1",
+        question: "Ship?",
+        options: ["Yes", "No"],
+        maxSelections: 1,
+        createdAt: "2026-01-01T00:00:00Z",
+        conversationId: "19:channel@thread.tacv2",
+        votes: {},
+      })),
+      recordVote: vi.fn(async () => null),
+    };
+    isCardActionInvokeAuthorized.mockResolvedValueOnce(false);
+
+    const task = monitorMSTeamsProvider({
+      cfg,
+      runtime: createRuntime(),
+      abortSignal: abort.signal,
+      conversationStore: createStores().conversationStore,
+      pollStore,
+    });
+
+    await vi.waitFor(() => {
+      expect(registerMSTeamsHandlers).toHaveBeenCalled();
+    });
+
+    const app = await loadMSTeamsSdkWithAuth.mock.results[0]?.value.then((result) => result.app);
+    const cardActionHandler = app.on.mock.calls.find(
+      (call: [string, unknown]) => call[0] === "card.action",
+    )?.[1];
+    if (typeof cardActionHandler !== "function") {
+      throw new Error("expected card.action handler");
+    }
+
+    const response = await cardActionHandler({
+      activity: {
+        type: "invoke",
+        name: "adaptiveCard/action",
+        from: { id: "29:user", aadObjectId: "aad-user" },
+        conversation: { id: "19:channel@thread.tacv2", conversationType: "channel" },
+        value: { action: { data: { openclawPollId: "poll-1", choices: "0" } } },
+      },
+    });
+
+    expect(response).toMatchObject({ statusCode: 200, value: "Not authorized." });
+    expect(isCardActionInvokeAuthorized).toHaveBeenCalledTimes(1);
+    expect(pollStore.getPoll).not.toHaveBeenCalled();
+    expect(pollStore.recordVote).not.toHaveBeenCalled();
+
+    abort.abort();
+    await task;
+  });
+
+  it("rejects poll card votes from the wrong conversation", async () => {
+    const abort = new AbortController();
+    const cfg = createConfig(0);
+    const pollStore: MSTeamsPollStore = {
+      createPoll: vi.fn(async () => {}),
+      getPoll: vi.fn(async () => ({
+        id: "poll-1",
+        question: "Ship?",
+        options: ["Yes", "No"],
+        maxSelections: 1,
+        createdAt: "2026-01-01T00:00:00Z",
+        conversationId: "19:expected@thread.tacv2",
+        votes: {},
+      })),
+      recordVote: vi.fn(async () => null),
+    };
+
+    const task = monitorMSTeamsProvider({
+      cfg,
+      runtime: createRuntime(),
+      abortSignal: abort.signal,
+      conversationStore: createStores().conversationStore,
+      pollStore,
+    });
+
+    await vi.waitFor(() => {
+      expect(registerMSTeamsHandlers).toHaveBeenCalled();
+    });
+
+    const app = await loadMSTeamsSdkWithAuth.mock.results[0]?.value.then((result) => result.app);
+    const cardActionHandler = app.on.mock.calls.find(
+      (call: [string, unknown]) => call[0] === "card.action",
+    )?.[1];
+    if (typeof cardActionHandler !== "function") {
+      throw new Error("expected card.action handler");
+    }
+
+    const response = await cardActionHandler({
+      activity: {
+        type: "invoke",
+        name: "adaptiveCard/action",
+        from: { id: "29:user", aadObjectId: "aad-user" },
+        conversation: { id: "19:other@thread.tacv2", conversationType: "channel" },
+        value: { action: { data: { openclawPollId: "poll-1", choices: "0" } } },
+      },
+    });
+
+    expect(response).toMatchObject({ statusCode: 200, value: "Poll not found." });
+    expect(isCardActionInvokeAuthorized).toHaveBeenCalledTimes(1);
+    expect(pollStore.getPoll).toHaveBeenCalledWith("poll-1");
+    expect(pollStore.recordVote).not.toHaveBeenCalled();
 
     abort.abort();
     await task;

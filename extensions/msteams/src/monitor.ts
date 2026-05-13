@@ -13,7 +13,13 @@ import type { MSTeamsConversationStore } from "./conversation-store.js";
 import { formatUnknownError } from "./errors.js";
 import { runMSTeamsFeedbackInvokeHandler } from "./feedback-invoke.js";
 import { runMSTeamsFileConsentInvokeHandler } from "./file-consent-invoke.js";
-import { registerMSTeamsHandlers, type MSTeamsActivityHandler } from "./monitor-handler.js";
+import { normalizeMSTeamsConversationId } from "./inbound.js";
+import {
+  isCardActionInvokeAuthorized,
+  isSigninInvokeAuthorized,
+  registerMSTeamsHandlers,
+  type MSTeamsActivityHandler,
+} from "./monitor-handler.js";
 import type { MSTeamsMessageHandlerDeps } from "./monitor-handler.types.js";
 import {
   createMSTeamsPollStoreFs,
@@ -370,6 +376,42 @@ export async function monitorMSTeamsProvider(
       if (vote) {
         const voterId = activity?.from?.aadObjectId ?? activity?.from?.id ?? "unknown";
         try {
+          if (!(await isCardActionInvokeAuthorized(adaptedCtx, handlerDeps))) {
+            return {
+              statusCode: 200,
+              type: "application/vnd.microsoft.activity.message",
+              value: "Not authorized.",
+            };
+          }
+
+          const existingPoll = await pollStore.getPoll(vote.pollId);
+          if (!existingPoll) {
+            log.debug?.("poll vote ignored (poll not found)", { pollId: vote.pollId });
+            return {
+              statusCode: 200,
+              type: "application/vnd.microsoft.activity.message",
+              value: "Poll not found.",
+            };
+          }
+          const pollConversationId = existingPoll.conversationId
+            ? normalizeMSTeamsConversationId(existingPoll.conversationId)
+            : undefined;
+          const activityConversationId = normalizeMSTeamsConversationId(
+            activity?.conversation?.id ?? "",
+          );
+          if (pollConversationId && pollConversationId !== activityConversationId) {
+            log.info("poll vote ignored (conversation mismatch)", {
+              pollId: vote.pollId,
+              expectedConversationId: pollConversationId,
+              receivedConversationId: activityConversationId || undefined,
+            });
+            return {
+              statusCode: 200,
+              type: "application/vnd.microsoft.activity.message",
+              value: "Poll not found.",
+            };
+          }
+
           const poll = await pollStore.recordVote({
             pollId: vote.pollId,
             voterId,
@@ -446,47 +488,53 @@ export async function monitorMSTeamsProvider(
   // can persist the delegated token for later OpenClaw use.
   if (ssoDeps) {
     app.event("signin", (ctx) => {
-      const activity = ctx.activity as {
-        from?: { id?: string; aadObjectId?: string };
-      };
-      const userIds = Array.from(
-        new Set(
-          [activity.from?.id, activity.from?.aadObjectId].filter((id): id is string => Boolean(id)),
-        ),
-      );
-      const connectionName = ctx.token.connectionName || ssoDeps.connectionName;
-      if (!connectionName || !ctx.token.token || userIds.length === 0) {
-        log.warn?.("msteams sso signin event missing token metadata", {
-          hasConnectionName: Boolean(connectionName),
-          hasToken: Boolean(ctx.token.token),
-          hasUser: userIds.length > 0,
-        });
-        return;
-      }
+      void (async () => {
+        const adaptedCtx = adaptSdkContext(ctx, app);
+        if (!(await isSigninInvokeAuthorized(adaptedCtx, handlerDeps))) {
+          return;
+        }
 
-      void Promise.all(
-        userIds.map((userId) =>
-          ssoDeps.tokenStore.save({
-            connectionName,
-            userId,
-            token: ctx.token.token,
-            expiresAt: ctx.token.expiration,
-            updatedAt: new Date().toISOString(),
-          }),
-        ),
-      )
-        .then(() => {
-          log.info("msteams sso token persisted", {
-            connectionName,
-            userIdCount: userIds.length,
-            hasExpiry: Boolean(ctx.token.expiration),
+        const activity = ctx.activity as {
+          from?: { id?: string; aadObjectId?: string };
+        };
+        const userIds = Array.from(
+          new Set(
+            [activity.from?.id, activity.from?.aadObjectId].filter((id): id is string =>
+              Boolean(id),
+            ),
+          ),
+        );
+        const connectionName = ctx.token.connectionName || ssoDeps.connectionName;
+        if (!connectionName || !ctx.token.token || userIds.length === 0) {
+          log.warn?.("msteams sso signin event missing token metadata", {
+            hasConnectionName: Boolean(connectionName),
+            hasToken: Boolean(ctx.token.token),
+            hasUser: userIds.length > 0,
           });
-        })
-        .catch((err: unknown) => {
-          log.error("msteams sso token persistence failed", {
-            error: formatUnknownError(err),
-          });
+          return;
+        }
+
+        await Promise.all(
+          userIds.map((userId) =>
+            ssoDeps.tokenStore.save({
+              connectionName,
+              userId,
+              token: ctx.token.token,
+              expiresAt: ctx.token.expiration,
+              updatedAt: new Date().toISOString(),
+            }),
+          ),
+        );
+        log.info("msteams sso token persisted", {
+          connectionName,
+          userIdCount: userIds.length,
+          hasExpiry: Boolean(ctx.token.expiration),
         });
+      })().catch((err: unknown) => {
+        log.error("msteams sso token persistence failed", {
+          error: formatUnknownError(err),
+        });
+      });
     });
   }
 
