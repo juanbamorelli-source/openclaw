@@ -675,6 +675,41 @@ describe("applyPluginAutoEnable core", () => {
     ]);
   });
 
+  it("auto-enables Codex when OpenAI is configured as a selectable model", () => {
+    const result = applyPluginAutoEnable({
+      config: {
+        agents: {
+          defaults: {
+            model: {
+              primary: "anthropic/claude-sonnet-4-6",
+            },
+            models: {
+              "anthropic/claude-sonnet-4-6": {},
+              "openai/gpt-5.5": {},
+            },
+          },
+        },
+      },
+      env,
+      manifestRegistry: makeRegistry([
+        { id: "openai", channels: [], providers: ["openai", "openai-codex"] },
+        {
+          id: "codex",
+          channels: [],
+          providers: ["codex"],
+          activation: { onAgentHarnesses: ["codex"] },
+        },
+      ]),
+    });
+
+    expect(result.config.plugins?.entries?.openai?.enabled).toBe(true);
+    expect(result.config.plugins?.entries?.codex?.enabled).toBe(true);
+    expect(result.changes).toEqual([
+      "openai/gpt-5.5 model configured, enabled automatically.",
+      "codex agent runtime configured, enabled automatically.",
+    ]);
+  });
+
   it("auto-enables an opt-in plugin when a provider runtime is configured", () => {
     const result = applyPluginAutoEnable({
       config: {

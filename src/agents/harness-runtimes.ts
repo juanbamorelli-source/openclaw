@@ -72,6 +72,13 @@ function hasOpenAIModelRef(config: OpenClawConfig, value: unknown, agentId?: str
   });
 }
 
+function hasOpenAIModelMapRef(config: OpenClawConfig, models: unknown, agentId?: string): boolean {
+  if (!isRecord(models)) {
+    return false;
+  }
+  return Object.keys(models).some((ref) => hasOpenAIModelRef(config, ref, agentId));
+}
+
 function pushConfiguredModelRuntimeIds(config: OpenClawConfig, runtimes: Set<string>): void {
   for (const providerConfig of Object.values(config.models?.providers ?? {})) {
     const providerRuntime = normalizeRuntimeId(providerConfig?.agentRuntime?.id);
@@ -141,6 +148,11 @@ export function collectConfiguredAgentHarnessRuntimes(
       runtimes.add("codex");
     }
   };
+  const pushCodexForOpenAIModelMap = (models: unknown, agentId?: string) => {
+    if (hasOpenAIModelMapRef(config, models, agentId)) {
+      runtimes.add("codex");
+    }
+  };
 
   if (includeEnvRuntime) {
     const envRuntime = normalizeRuntimeId(env.OPENCLAW_AGENT_RUNTIME);
@@ -154,6 +166,7 @@ export function collectConfiguredAgentHarnessRuntimes(
   }
   const defaultsModel = config.agents?.defaults?.model;
   pushCodexForOpenAIModel(defaultsModel);
+  pushCodexForOpenAIModelMap(config.agents?.defaults?.models);
   if (Array.isArray(config.agents?.list)) {
     for (const agent of config.agents.list) {
       if (!isRecord(agent)) {
@@ -163,6 +176,7 @@ export function collectConfiguredAgentHarnessRuntimes(
         agent.model ?? defaultsModel,
         typeof agent.id === "string" ? agent.id : undefined,
       );
+      pushCodexForOpenAIModelMap(agent.models, typeof agent.id === "string" ? agent.id : undefined);
     }
   }
 

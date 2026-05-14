@@ -1445,6 +1445,28 @@ describe("resolveGatewayStartupPluginIds", () => {
     });
   });
 
+  it("includes Codex when OpenAI is configured as a selectable model", () => {
+    expectStartupPluginIdsCase({
+      config: {
+        agents: {
+          defaults: {
+            model: { primary: "anthropic/claude-sonnet-4-6" },
+            models: {
+              "anthropic/claude-sonnet-4-6": {},
+              "openai/gpt-5.5": {},
+            },
+          },
+        },
+        plugins: {
+          entries: {
+            codex: { enabled: true },
+          },
+        },
+      } as OpenClawConfig,
+      expected: ["demo-channel", "browser", "codex", "memory-core"],
+    });
+  });
+
   it("does not include Codex when an OpenAI model is manually pinned to PI", () => {
     expectStartupPluginIdsCase({
       config: {
