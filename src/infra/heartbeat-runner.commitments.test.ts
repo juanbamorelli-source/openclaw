@@ -294,6 +294,7 @@ describe("runHeartbeatOnce commitments", () => {
               },
             },
           },
+          messages: { visibleReplies: "message_tool" },
           channels: { telegram: { allowFrom: ["*"] } },
           session: { store: storePath },
           commitments: { enabled: true },
