@@ -82,9 +82,12 @@ function withExplicitProtectedControlPlanePaths(
   writeOptions: Awaited<ReturnType<typeof readConfigFileSnapshotForWrite>>["writeOptions"],
   changedPaths: readonly (readonly string[])[],
 ): Awaited<ReturnType<typeof readConfigFileSnapshotForWrite>>["writeOptions"] {
-  const explicitSetPaths = changedPaths
-    .filter(isProtectedControlPlaneConfigPath)
-    .map((path) => [...path]);
+  const explicitSetPaths: string[][] = [];
+  for (const path of changedPaths) {
+    if (isProtectedControlPlaneConfigPath(path)) {
+      explicitSetPaths.push([...path]);
+    }
+  }
   if (explicitSetPaths.length === 0) {
     return writeOptions;
   }

@@ -301,11 +301,7 @@ function collectConfigMutationChangedPaths(
       paths.push(pathSegments);
       return paths;
     }
-    const childRecord = previousIsObject
-      ? (previous as Record<string, unknown>)
-      : nextIsObject
-        ? (next as Record<string, unknown>)
-        : null;
+    const childRecord = previousIsObject ? previous : nextIsObject ? next : null;
     if (childRecord) {
       for (const key of Object.keys(childRecord)) {
         collectConfigMutationChangedPaths(
@@ -319,8 +315,8 @@ function collectConfigMutationChangedPaths(
     return paths;
   }
 
-  const previousRecord = previous as Record<string, unknown>;
-  const nextRecord = next as Record<string, unknown>;
+  const previousRecord = previous;
+  const nextRecord = next;
   const keys = new Set([...Object.keys(previousRecord), ...Object.keys(nextRecord)]);
   for (const key of keys) {
     collectConfigMutationChangedPaths(
