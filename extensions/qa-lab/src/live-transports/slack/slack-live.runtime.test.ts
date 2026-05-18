@@ -85,6 +85,12 @@ describe("Slack live QA runtime helpers", () => {
         },
       },
       messages: {
+        inbound: {
+          debounceMs: 5_000,
+          byChannel: {
+            discord: 750,
+          },
+        },
         statusReactions: { enabled: true },
       },
     };
@@ -99,6 +105,11 @@ describe("Slack live QA runtime helpers", () => {
 
     expect(next.plugins?.allow).toContain("slack");
     expect(next.messages?.ackReactionScope).toBe("off");
+    expect(next.messages?.inbound?.debounceMs).toBe(5_000);
+    expect(next.messages?.inbound?.byChannel).toEqual({
+      discord: 750,
+      slack: 0,
+    });
     expect(next.messages?.statusReactions?.enabled).toBe(false);
     expect(next.messages?.groupChat?.visibleReplies).toBe("automatic");
   });

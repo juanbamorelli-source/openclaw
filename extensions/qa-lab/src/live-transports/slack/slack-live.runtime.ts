@@ -633,6 +633,13 @@ function buildSlackQaConfig(
     messages: {
       ...baseCfg.messages,
       ackReactionScope: "off",
+      inbound: {
+        ...baseCfg.messages?.inbound,
+        byChannel: {
+          ...baseCfg.messages?.inbound?.byChannel,
+          slack: 0,
+        },
+      },
       groupChat: {
         ...baseCfg.messages?.groupChat,
         visibleReplies: "automatic",
