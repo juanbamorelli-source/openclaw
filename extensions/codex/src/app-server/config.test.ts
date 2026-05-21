@@ -12,6 +12,7 @@ import {
   resolveCodexComputerUseConfig,
   resolveOpenClawExecModeForCodexAppServer,
   resolveOpenClawExecModeFromConfig,
+  resolveOpenClawExecPolicyForCodexAppServer,
   resolveCodexPluginsPolicy,
 } from "./config.js";
 
@@ -958,6 +959,41 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
       }),
     ).toBe("ask");
   });
+
+  it.each(["always", "on-miss"] as const)(
+    "keeps legacy full exec security with ask=%s on full Codex sandbox",
+    (ask) => {
+      const config = {
+        tools: {
+          exec: {
+            security: "full",
+            ask,
+          },
+        },
+      };
+      const execPolicy = resolveOpenClawExecPolicyForCodexAppServer({ config });
+
+      expect(resolveOpenClawExecModeForCodexAppServer({ config })).toBe("ask");
+      expectRuntimePolicy(
+        resolveRuntimeForTest({
+          pluginConfig: {
+            appServer: {
+              mode: "yolo",
+              approvalPolicy: "never",
+              sandbox: "workspace-write",
+              approvalsReviewer: "auto_review",
+            },
+          },
+          execPolicy,
+        }),
+        {
+          approvalPolicy: "on-request",
+          sandbox: "danger-full-access",
+          approvalsReviewer: "user",
+        },
+      );
+    },
+  );
 
   it("treats ask-only legacy overrides as normalized mode overrides", () => {
     const config = {

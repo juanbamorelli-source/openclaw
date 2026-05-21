@@ -89,7 +89,7 @@ import {
   resolveCodexComputerUseConfig,
   resolveCodexPluginsPolicy,
   resolveCodexAppServerRuntimeOptions,
-  resolveOpenClawExecModeForCodexAppServer,
+  resolveOpenClawExecPolicyForCodexAppServer,
   withMcpElicitationsApprovalPolicy,
   type CodexAppServerRuntimeOptions,
   type CodexPluginConfig,
@@ -952,7 +952,7 @@ export async function runCodexAppServerAttempt(
   });
   const configuredAppServer = resolveCodexAppServerRuntimeOptions({
     pluginConfig,
-    execMode: resolveOpenClawExecModeForCodexAppServer({
+    execPolicy: resolveOpenClawExecPolicyForCodexAppServer({
       execOverrides: params.execOverrides,
       config: params.config,
       agentId: sessionAgentId,

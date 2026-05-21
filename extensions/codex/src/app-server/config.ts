@@ -15,12 +15,13 @@ type CodexAppServerPolicyMode = "yolo" | "guardian";
 type OpenClawExecMode = "deny" | "allowlist" | "ask" | "auto" | "full";
 type OpenClawExecSecurity = "deny" | "allowlist" | "full";
 type OpenClawExecAsk = "off" | "on-miss" | "always";
-type OpenClawExecPolicy = {
+export type OpenClawExecPolicyForCodexAppServer = {
   mode?: OpenClawExecMode;
   security: OpenClawExecSecurity;
   ask: OpenClawExecAsk;
   touched: boolean;
 };
+type OpenClawExecPolicy = OpenClawExecPolicyForCodexAppServer;
 type CodexAppServerDefaultPolicy = {
   mode: CodexAppServerPolicyMode;
   approvalPolicy?: CodexAppServerApprovalPolicy;
@@ -369,6 +370,7 @@ export function resolveCodexAppServerRuntimeOptions(
   params: {
     pluginConfig?: unknown;
     execMode?: OpenClawExecMode;
+    execPolicy?: OpenClawExecPolicyForCodexAppServer;
     env?: NodeJS.ProcessEnv;
     requirementsToml?: string | null;
     requirementsPath?: string;
@@ -396,12 +398,19 @@ export function resolveCodexAppServerRuntimeOptions(
   const clearEnv = normalizeStringList(config.clearEnv);
   const authToken = readNonEmptyString(config.authToken);
   const url = readNonEmptyString(config.url);
-  assertCodexAppServerAllowedForOpenClawExecMode(params.execMode);
+  const execMode = resolveEffectiveOpenClawExecModeForCodexAppServer({
+    execMode: params.execMode,
+    execPolicy: params.execPolicy,
+  });
+  assertCodexAppServerAllowedForOpenClawExecMode(execMode);
   const explicitPolicyMode =
     resolvePolicyMode(config.mode) ?? resolvePolicyMode(env.OPENCLAW_CODEX_APP_SERVER_MODE);
-  const normalizedPolicyMode = resolveCodexPolicyModeForOpenClawExecMode(params.execMode);
-  const forceUserReviewer =
-    params.execMode !== undefined && params.execMode !== "auto" && params.execMode !== "full";
+  const normalizedPolicyMode = resolveCodexPolicyModeForOpenClawExecMode(execMode);
+  const forceUserReviewer = execMode !== undefined && execMode !== "auto" && execMode !== "full";
+  const forceDangerFullAccessSandbox =
+    params.execPolicy?.touched === true &&
+    params.execPolicy.security === "full" &&
+    params.execPolicy.ask !== "off";
   const defaultPolicy =
     explicitPolicyMode && !forceUserReviewer
       ? undefined
@@ -416,13 +425,16 @@ export function resolveCodexAppServerRuntimeOptions(
           platform: params.platform,
           hostName: params.hostName,
         });
-  const forcedPolicy = forceUserReviewer
-    ? {
-        approvalPolicy: defaultPolicy?.approvalPolicy ?? "on-request",
-        sandbox: defaultPolicy?.sandbox ?? "workspace-write",
-        approvalsReviewer: defaultPolicy?.approvalsReviewer ?? "user",
-      }
-    : undefined;
+  const forcedPolicy =
+    forceUserReviewer || forceDangerFullAccessSandbox
+      ? {
+          approvalPolicy: defaultPolicy?.approvalPolicy ?? "on-request",
+          sandbox: forceDangerFullAccessSandbox
+            ? "danger-full-access"
+            : (defaultPolicy?.sandbox ?? "workspace-write"),
+          approvalsReviewer: defaultPolicy?.approvalsReviewer ?? "user",
+        }
+      : undefined;
   const policyMode = explicitPolicyMode ?? normalizedPolicyMode ?? defaultPolicy?.mode ?? "yolo";
   const serviceTier = normalizeCodexServiceTier(config.serviceTier);
   if (transport === "websocket" && !url) {
@@ -1042,12 +1054,35 @@ export function resolveOpenClawExecModeForCodexAppServer(params: {
   config?: unknown;
   agentId?: string;
 }): OpenClawExecMode | undefined {
+  const policy = resolveOpenClawExecPolicyForCodexAppServer(params);
+  return policy.touched ? policy.mode : undefined;
+}
+
+export function resolveOpenClawExecPolicyForCodexAppServer(params: {
+  execOverrides?: {
+    mode?: unknown;
+    security?: unknown;
+    ask?: unknown;
+  };
+  config?: unknown;
+  agentId?: string;
+}): OpenClawExecPolicyForCodexAppServer {
   const basePolicy = resolveOpenClawExecPolicyFromConfig({
     config: params.config,
     agentId: params.agentId,
   });
   const overridePolicy = applyOpenClawExecPolicyLayer(basePolicy, params.execOverrides);
-  return overridePolicy.touched ? overridePolicy.mode : undefined;
+  return overridePolicy;
+}
+
+function resolveEffectiveOpenClawExecModeForCodexAppServer(params: {
+  execMode?: OpenClawExecMode;
+  execPolicy?: OpenClawExecPolicyForCodexAppServer;
+}): OpenClawExecMode | undefined {
+  if (params.execPolicy?.touched === true) {
+    return params.execPolicy.mode;
+  }
+  return params.execMode;
 }
 
 function resolveCodexPolicyModeForOpenClawExecMode(
