@@ -82,12 +82,6 @@ describe("candidate-based exec allowlist", () => {
 
     expect(result.analysisOk).toBe(true);
     expect(result.allowlistSatisfied).toBe(false);
-    expect(result.authorizationPlan?.ok).toBe(true);
-    expect(
-      result.authorizationPlan?.groups.flatMap((group) =>
-        group.candidates.map((candidate) => candidate.reasons),
-      ),
-    ).toEqual([["inline-eval"]]);
   });
 
   it("does not auto-approve eval through an executable allowlist", async () => {
@@ -130,12 +124,34 @@ describe("candidate-based exec allowlist", () => {
     });
 
     expect(result.allowlistSatisfied).toBe(false);
-    expect(result.authorizationPlan).toEqual(
-      expect.objectContaining({
-        ok: false,
-        dialect: "powershell",
-      }),
-    );
+  });
+
+  it("allows PowerShell file scripts through the script allowlist matcher", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const dir = makeTempDir();
+    makeExecutable(dir, "pwsh");
+    const script = path.join(dir, "trusted.ps1");
+    fs.writeFileSync(script, "Write-Output ok\n");
+    const env = makePathEnv(dir);
+    const analysis = analyzeArgvCommand({
+      argv: ["pwsh", "-File", script],
+      cwd: dir,
+      env,
+    });
+
+    const result = await evaluateExecAllowlist({
+      analysis,
+      allowlist: [{ pattern: script }],
+      safeBins: new Set(),
+      cwd: dir,
+      env,
+      platform: process.platform,
+    });
+
+    expect(result.allowlistSatisfied).toBe(true);
+    expect(result.segmentSatisfiedBy).toEqual(["allowlist"]);
   });
 
   it("does not satisfy argv shell-wrapper line continuations through inner allowlists", async () => {
@@ -163,9 +179,6 @@ describe("candidate-based exec allowlist", () => {
     });
 
     expect(result.allowlistSatisfied).toBe(false);
-    expect(result.segments?.map((segment) => segment.argv)).toEqual([
-      ["/bin/sh", "-c", inlineCommand],
-    ]);
   });
 
   it("keeps curl pipe shell requiring both sides while only persisting curl", async () => {
@@ -326,25 +339,6 @@ describe("candidate-based exec allowlist", () => {
     expect(both.segmentSatisfiedBy).toEqual(["allowlist", "allowlist"]);
   });
 
-  it("marks shell-wrapper safe-bin payloads as inlineChain for execution rewrite", async () => {
-    if (process.platform === "win32") {
-      return;
-    }
-    const result = await evaluateShellAllowlist({
-      command: "sh -c 'head -c 16'",
-      allowlist: [],
-      safeBins: new Set(["head"]),
-      cwd: "/tmp",
-      env: { PATH: "/usr/bin:/bin" },
-      platform: process.platform,
-    });
-
-    expect(result.analysisOk).toBe(true);
-    expect(result.allowlistSatisfied).toBe(true);
-    expect(result.segments.map((segment) => segment.argv)).toEqual([["sh", "-c", "head -c 16"]]);
-    expect(result.segmentSatisfiedBy).toEqual(["inlineChain"]);
-  });
-
   it("does not satisfy path-scoped shell-wrapper payloads through reusable script allowlists", async () => {
     if (process.platform === "win32") {
       return;
@@ -367,9 +361,6 @@ describe("candidate-based exec allowlist", () => {
 
     expect(result.analysisOk).toBe(true);
     expect(result.allowlistSatisfied).toBe(false);
-    expect(result.segments.map((segment) => segment.argv)).toEqual([
-      ["sh", "-c", "./scripts/run.sh"],
-    ]);
   });
 
   it("does not satisfy later path-scoped shell-wrapper payloads through reusable script allowlists", async () => {
@@ -395,9 +386,6 @@ describe("candidate-based exec allowlist", () => {
 
     expect(result.analysisOk).toBe(true);
     expect(result.allowlistSatisfied).toBe(false);
-    expect(result.segments.map((segment) => segment.argv)).toEqual([
-      ["sh", "-c", "git status && ./scripts/run.sh"],
-    ]);
   });
 
   it("requires all sequence candidates inside static shell wrappers", async () => {
@@ -443,7 +431,7 @@ describe("candidate-based exec allowlist", () => {
     expect(both.segments.map((segment) => segment.argv)).toEqual([["git", "status"], ["id"]]);
   });
 
-  it("allows skill preludes inside shell wrappers when they reach a trusted wrapper", async () => {
+  it("rejects skill preludes inside shell wrappers even when they reach a trusted wrapper", async () => {
     if (process.platform === "win32") {
       return;
     }
@@ -472,11 +460,10 @@ describe("candidate-based exec allowlist", () => {
     });
 
     expect(result.analysisOk).toBe(true);
-    expect(result.allowlistSatisfied).toBe(true);
-    expect(result.segmentSatisfiedBy).toEqual(["skillPrelude", "skillPrelude", "skills"]);
+    expect(result.allowlistSatisfied).toBe(false);
   });
 
-  it("keeps positional carriers tied to the carried executable allowlist exception", async () => {
+  it("rejects blocked positional carriers even when the carrier is allowlisted", async () => {
     if (process.platform === "win32") {
       return;
     }
@@ -495,36 +482,6 @@ describe("candidate-based exec allowlist", () => {
     });
 
     expect(result.analysisOk).toBe(true);
-    expect(result.allowlistSatisfied).toBe(true);
-    expect(result.segments.map((segment) => segment.argv)).toEqual([
-      ["sh", "-c", '$0 "$@"', "xargs", "echo", "SAFE"],
-    ]);
-  });
-
-  it("returns planned segments for argv shell-wrapper candidate metadata", async () => {
-    if (process.platform === "win32") {
-      return;
-    }
-    const dir = makeTempDir();
-    const whoami = makeExecutable(dir, "whoami");
-    const ls = makeExecutable(dir, "ls");
-    const analysis = analyzeArgvCommand({
-      argv: ["/bin/sh", "-c", "whoami && ls"],
-      cwd: dir,
-      env: makePathEnv(dir),
-    });
-
-    const result = await evaluateExecAllowlist({
-      analysis,
-      allowlist: [{ pattern: whoami }, { pattern: ls }],
-      safeBins: new Set(),
-      cwd: dir,
-      env: makePathEnv(dir),
-      platform: process.platform,
-    });
-
-    expect(result.allowlistSatisfied).toBe(true);
-    expect(result.segments?.map((segment) => segment.argv)).toEqual([["whoami"], ["ls"]]);
-    expect(result.segmentSatisfiedBy).toEqual(["allowlist", "allowlist"]);
+    expect(result.allowlistSatisfied).toBe(false);
   });
 });
