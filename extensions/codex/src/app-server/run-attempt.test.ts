@@ -68,6 +68,11 @@ import {
   runCodexAppServerAttempt as runCodexAppServerAttemptImpl,
   testing,
 } from "./run-attempt.js";
+import {
+  ensureCodexSandboxExecServerEnvironment,
+  releaseCodexSandboxExecServerEnvironment,
+} from "./sandbox-exec-server.js";
+import { createSandboxContext } from "./sandbox-exec-server.test-helpers.js";
 import { readCodexAppServerBinding, writeCodexAppServerBinding } from "./session-binding.js";
 import { createCodexTestModel } from "./test-support.js";
 import {
@@ -1124,80 +1129,71 @@ describe("runCodexAppServerAttempt", () => {
   });
 
   it("routes native Codex execution through an OpenClaw sandbox exec-server when opted in", async () => {
-    const sandboxBackendId = "codex-native-exec-server-test-sandbox";
-    const restoreSandboxBackend = registerSandboxBackend(sandboxBackendId, async () => ({
-      id: sandboxBackendId,
-      runtimeId: "codex-test-runtime",
-      runtimeLabel: "Codex Test Sandbox",
-      workdir: "/workspace",
-      buildExecSpec: async () => ({
-        argv: ["true"],
-        env: {},
-        stdinMode: "pipe-closed" as const,
-      }),
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const params = createParams(sessionFile, workspaceDir);
+    params.disableTools = false;
+    params.runtimePlan = createCodexRuntimePlanFixture();
+    const appServer = {
+      ...createThreadLifecycleAppServerOptions(),
+      sandbox: "danger-full-access",
+    };
+    const sandbox = createSandboxContext({
       runShellCommand: async () => ({
         stdout: Buffer.alloc(0),
         stderr: Buffer.alloc(0),
         code: 0,
       }),
-    }));
-    try {
-      testing.setOpenClawCodingToolsFactoryForTests(() => [
-        createRuntimeDynamicTool("exec"),
-        createRuntimeDynamicTool("process"),
-        createRuntimeDynamicTool("message"),
-      ]);
-      const sessionFile = path.join(tempDir, "session.jsonl");
-      const workspaceDir = path.join(tempDir, "workspace");
-      const params = createParams(sessionFile, workspaceDir);
-      params.disableTools = false;
-      params.runtimePlan = createCodexRuntimePlanFixture();
-      params.config = {
-        agents: {
-          defaults: {
-            sandbox: {
-              mode: "all",
-              backend: sandboxBackendId,
-              scope: "session",
-            },
-          },
-        },
-      } as never;
-      const { clientFactory, requests, waitForMethod } = createStartedThreadHarness(
-        async (method) => {
-          if (method === "turn/start") {
-            return turnStartResult("turn-1", "completed");
-          }
-          return undefined;
-        },
-      );
-      const abortController = new AbortController();
-      params.abortSignal = abortController.signal;
-
-      const run = runCodexAppServerAttempt(params, {
-        clientFactory,
-        pluginConfig: {
-          appServer: {
-            mode: "yolo",
-            experimental: { sandboxExecServer: true },
-          },
-        },
-      });
-      try {
-        await waitForMethod("turn/start");
-        await run;
-      } catch (error) {
-        abortController.abort("test_cleanup");
-        await run.catch(() => undefined);
-        throw error;
+    });
+    const request = vi.fn(async (method: string, _params?: unknown) => {
+      if (method === "environment/add") {
+        return {};
       }
+      if (method === "thread/start") {
+        return threadStartResult();
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+    const client = {
+      getServerVersion: () => "0.132.0",
+      request,
+    };
+    try {
+      const environment = await ensureCodexSandboxExecServerEnvironment({
+        client: client as never,
+        sandbox,
+        appServerStartOptions: appServer.start,
+      });
+      if (!environment) {
+        throw new Error("expected sandbox exec-server environment");
+      }
+      const environmentSelection = [environment];
 
-      const environmentAdd = requests.find((request) => request.method === "environment/add");
-      const environmentAddParams = environmentAdd?.params as
+      await startOrResumeThread({
+        client: client as never,
+        params,
+        cwd: environment.cwd,
+        dynamicTools: [createNamedDynamicTool("message")] as never,
+        appServer: appServer as never,
+        nativeCodeModeEnabled: true,
+        nativeCodeModeOnlyEnabled: false,
+        userMcpServersEnabled: false,
+        environmentSelection,
+      });
+
+      const turnParams = buildTurnStartParams(params, {
+        threadId: "thread-1",
+        cwd: environment.cwd,
+        appServer: appServer as never,
+        sandboxPolicy: { type: "externalSandbox", networkAccess: "enabled" },
+        environmentSelection,
+      });
+      const environmentAdd = request.mock.calls.find(([method]) => method === "environment/add");
+      const environmentAddParams = environmentAdd?.[1] as
         | { environmentId?: string; execServerUrl?: string }
         | undefined;
-      const startRequest = requests.find((request) => request.method === "thread/start");
-      const startParams = startRequest?.params as
+      const startRequest = request.mock.calls.find(([method]) => method === "thread/start");
+      const startParams = startRequest?.[1] as
         | {
             cwd?: string;
             dynamicTools?: Array<{ name: string }>;
@@ -1207,14 +1203,6 @@ describe("runCodexAppServerAttempt", () => {
               "features.code_mode"?: boolean;
               "features.code_mode_only"?: boolean;
             };
-          }
-        | undefined;
-      const turnRequest = requests.find((request) => request.method === "turn/start");
-      const turnParams = turnRequest?.params as
-        | {
-            cwd?: string;
-            environments?: Array<{ environmentId?: string; cwd?: string }>;
-            sandboxPolicy?: { type?: string; networkAccess?: string };
           }
         | undefined;
 
@@ -1235,7 +1223,7 @@ describe("runCodexAppServerAttempt", () => {
       expect(turnParams?.cwd).toBe("/workspace");
       expect(turnParams?.environments).toEqual(startParams?.environments);
     } finally {
-      restoreSandboxBackend();
+      await releaseCodexSandboxExecServerEnvironment(sandbox);
     }
   });
 
