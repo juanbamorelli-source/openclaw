@@ -5,6 +5,7 @@ import {
   isActiveHarnessContextEngine,
   resolveCompactionTimeoutMs,
   resolveContextEngineOwnerPluginId,
+  resolveSandboxContext,
   resolveSessionAgentIds,
   runHarnessContextEngineMaintenance,
   type CompactEmbeddedPiSessionParams,
@@ -343,14 +344,26 @@ async function compactCodexNativeThread(
     sessionKey: params.sessionKey,
     config: params.config,
   });
+  const execPolicy = resolveOpenClawExecPolicyForCodexAppServer({
+    config: params.config,
+    agentId: sessionAgentId,
+    execOverrides: params.execOverrides,
+    approvals: loadExecApprovals(),
+  });
+  const sandboxSessionKey =
+    params.sandboxSessionKey?.trim() || params.sessionKey?.trim() || params.sessionId;
+  const sandboxForPolicy =
+    execPolicy.touched && execPolicy.security === "full" && execPolicy.ask !== "off"
+      ? await resolveSandboxContext({
+          config: params.config,
+          sessionKey: sandboxSessionKey,
+          workspaceDir: params.workspaceDir,
+        })
+      : undefined;
   const appServer = resolveCodexAppServerRuntimeOptions({
     pluginConfig: options.pluginConfig,
-    execPolicy: resolveOpenClawExecPolicyForCodexAppServer({
-      config: params.config,
-      agentId: sessionAgentId,
-      execOverrides: params.execOverrides,
-      approvals: loadExecApprovals(),
-    }),
+    execPolicy,
+    openClawSandboxActive: sandboxForPolicy?.enabled === true,
   });
   const binding = await readCodexAppServerBinding(params.sessionFile, { config: params.config });
   if (!binding?.threadId) {

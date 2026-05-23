@@ -12,6 +12,35 @@ import { maybeCompactCodexAppServerSession as maybeCompactCodexAppServerSessionI
 import type { CodexServerNotification } from "./protocol.js";
 import { readCodexAppServerBinding, writeCodexAppServerBinding } from "./session-binding.js";
 
+const codexRequirementsTomlMock = vi.hoisted(() => vi.fn<() => string | undefined>());
+const resolveSandboxContextMock = vi.hoisted(() =>
+  vi.fn<(...args: unknown[]) => Promise<{ enabled: boolean } | null>>(async () => null),
+);
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    readFileSync(filePath: string | URL | number, options?: BufferEncoding | object | null) {
+      if (filePath === "/etc/codex/requirements.toml") {
+        const content = codexRequirementsTomlMock();
+        if (content !== undefined) {
+          return content;
+        }
+      }
+      return actual.readFileSync(filePath, options);
+    },
+  };
+});
+
+vi.mock("openclaw/plugin-sdk/agent-harness-runtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("openclaw/plugin-sdk/agent-harness-runtime")>();
+  return {
+    ...actual,
+    resolveSandboxContext: resolveSandboxContextMock,
+  };
+});
+
 let tempDir: string;
 let codexAppServerClientFactoryForTest: CodexAppServerClientFactory | undefined;
 
@@ -96,6 +125,9 @@ describe("maybeCompactCodexAppServerSession", () => {
 
   afterEach(async () => {
     resetCodexAppServerClientFactoryForTest();
+    codexRequirementsTomlMock.mockReset();
+    resolveSandboxContextMock.mockReset();
+    resolveSandboxContextMock.mockResolvedValue(null);
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
@@ -365,6 +397,59 @@ describe("maybeCompactCodexAppServerSession", () => {
       }),
     );
     expect(fake.request).not.toHaveBeenCalled();
+  });
+
+  it("passes sandbox state when resolving native compaction policy", async () => {
+    codexRequirementsTomlMock.mockReturnValue(
+      [
+        'allowed_sandbox_modes = ["read-only", "workspace-write"]',
+        'allowed_approval_policies = ["never", "on-request"]',
+        'allowed_approvals_reviewers = ["user"]',
+      ].join("\n"),
+    );
+    resolveSandboxContextMock.mockResolvedValue({ enabled: true });
+    const fake = createFakeCodexClient();
+    const factory = vi.fn(async () => fake.client);
+    setCodexAppServerClientFactoryForTest(factory);
+    const sessionFile = await writeTestBinding();
+
+    const pendingResult = maybeCompactCodexAppServerSession({
+      sessionId: "session-1",
+      sessionKey: "agent:main:session-1",
+      sandboxSessionKey: "agent:main:sandbox-1",
+      sessionFile,
+      workspaceDir: tempDir,
+      config: {
+        tools: {
+          exec: {
+            security: "full",
+            ask: "on-miss",
+          },
+        },
+      },
+    });
+    await vi.waitFor(() => {
+      expect(fake.request).toHaveBeenCalledWith("thread/compact/start", { threadId: "thread-1" });
+    });
+    fake.emit({
+      method: "thread/compacted",
+      params: { threadId: "thread-1", turnId: "turn-1" },
+    });
+    const result = requireCompactResult(await pendingResult);
+
+    expect(result.ok).toBe(true);
+    expect(resolveSandboxContextMock).toHaveBeenCalledWith({
+      config: {
+        tools: {
+          exec: {
+            security: "full",
+            ask: "on-miss",
+          },
+        },
+      },
+      sessionKey: "agent:main:sandbox-1",
+      workspaceDir: tempDir,
+    });
   });
 
   it("warns when stale OpenClaw compaction overrides are ignored", async () => {
