@@ -6,6 +6,7 @@ import {
   type ExecApprovalsFile,
 } from "openclaw/plugin-sdk/exec-approvals-runtime";
 import { normalizeAgentId } from "openclaw/plugin-sdk/routing";
+import { detectWindowsSpawnCommandInlineArgs } from "openclaw/plugin-sdk/windows-spawn";
 import { z } from "zod";
 import type { CodexSandboxPolicy, CodexServiceTier } from "./protocol.js";
 
@@ -448,29 +449,23 @@ export function resolveCodexAppServerRuntimeOptions(
           platform: params.platform,
           hostName: params.hostName,
         });
-  const preserveExplicitAutoPolicy = forceGuardianReviewer;
+  const preserveExplicitAutoSandbox = forceGuardianReviewer && configuredSandbox === "read-only";
   const forcedPolicy = forceRuntimePolicy
     ? {
-        approvalPolicy:
-          preserveExplicitAutoPolicy && explicitApprovalPolicy !== undefined
-            ? undefined
-            : (defaultPolicy?.approvalPolicy ?? "on-request"),
-        sandbox:
-          preserveExplicitAutoPolicy && configuredSandbox !== undefined
-            ? undefined
-            : forceDangerFullAccessSandbox
-              ? selectForcedDangerFullAccessSandbox({
-                  defaultPolicy,
-                  openClawSandboxActive: params.openClawSandboxActive === true,
-                })
-              : selectForcedPromptingSandbox({
-                  configuredSandbox,
-                  defaultSandbox: defaultPolicy?.sandbox,
-                }),
+        approvalPolicy: defaultPolicy?.approvalPolicy ?? "on-request",
+        sandbox: preserveExplicitAutoSandbox
+          ? undefined
+          : forceDangerFullAccessSandbox
+            ? selectForcedDangerFullAccessSandbox({
+                defaultPolicy,
+                openClawSandboxActive: params.openClawSandboxActive === true,
+              })
+            : selectForcedPromptingSandbox({
+                configuredSandbox,
+                defaultSandbox: defaultPolicy?.sandbox,
+              }),
         approvalsReviewer:
-          preserveExplicitAutoPolicy && explicitApprovalsReviewer !== undefined
-            ? undefined
-            : (defaultPolicy?.approvalsReviewer ?? (forceUserReviewer ? "user" : "auto_review")),
+          defaultPolicy?.approvalsReviewer ?? (forceUserReviewer ? "user" : "auto_review"),
       }
     : undefined;
   const policyMode = ignoreLegacyYoloPolicyMode

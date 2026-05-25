@@ -613,7 +613,10 @@ describe("createModelSelectionState respects session model override", () => {
   const defaultProvider = "inferencer";
   const defaultModel = "deepseek-v3-4bit-mlx";
 
-  async function resolveState(sessionEntry: ReturnType<typeof makeEntry>) {
+  async function resolveState(
+    sessionEntry: ReturnType<typeof makeEntry>,
+    overrides: Partial<Parameters<typeof createModelSelectionState>[0]> = {},
+  ) {
     const cfg = {} as OpenClawConfig;
     const sessionKey = "agent:main:main";
     const sessionStore = { [sessionKey]: sessionEntry };
@@ -629,6 +632,7 @@ describe("createModelSelectionState respects session model override", () => {
       provider: defaultProvider,
       model: defaultModel,
       hasModelDirective: false,
+      ...overrides,
     });
   }
 
@@ -642,6 +646,23 @@ describe("createModelSelectionState respects session model override", () => {
 
     expect(state.provider).toBe("kimi");
     expect(state.model).toBe("kimi-code");
+  });
+
+  it("skips stored overrides for one-turn model overrides", async () => {
+    const state = await resolveState(
+      makeEntry({
+        providerOverride: "kimi-coding",
+        modelOverride: "kimi-code",
+      }),
+      {
+        provider: "openai",
+        model: "gpt-5.4",
+        hasOneTurnModelOverride: true,
+      },
+    );
+
+    expect(state.provider).toBe("openai");
+    expect(state.model).toBe("gpt-5.4");
   });
 
   it("falls back to default when no modelOverride is set", async () => {

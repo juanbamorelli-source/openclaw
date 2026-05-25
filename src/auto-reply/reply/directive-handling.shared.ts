@@ -1,6 +1,6 @@
 import { formatCliCommand } from "../../cli/command-format.js";
 import type { SessionEntry } from "../../config/sessions.js";
-import { resolveExecPolicyForMode, type ExecMode } from "../../infra/exec-approvals.js";
+import { normalizeExecMode, resolveExecPolicyForMode } from "../../infra/exec-approvals.js";
 import { SYSTEM_MARK, prefixSystemMessage } from "../../infra/system-message.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
 import type { InlineDirectives } from "./directive-handling.parse.js";
@@ -87,10 +87,9 @@ export function applyExecDirectivePersistence(params: {
     delete sessionEntry.execAsk;
     updated = true;
   } else if (directives.execSecurity !== undefined || directives.execAsk !== undefined) {
+    const inheritedExecMode = normalizeExecMode(sessionEntry.execMode);
     const inheritedModePolicy =
-      sessionEntry.execMode !== undefined
-        ? resolveExecPolicyForMode(sessionEntry.execMode as ExecMode)
-        : undefined;
+      inheritedExecMode !== null ? resolveExecPolicyForMode(inheritedExecMode) : undefined;
     const previousExecSecurity = sessionEntry.execSecurity;
     const previousExecAsk = sessionEntry.execAsk;
     sessionEntry.execSecurity =

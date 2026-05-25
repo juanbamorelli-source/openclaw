@@ -1553,6 +1553,52 @@ describe("exec approval handlers", () => {
     await requestPromise;
   });
 
+  it("honors explicit allowed decisions on exec approval requests", async () => {
+    const { handlers, broadcasts, respond, context } = createExecApprovalFixture();
+
+    const requestPromise = requestExecApproval({
+      handlers,
+      respond,
+      context,
+      params: {
+        twoPhase: true,
+        host: "gateway",
+        command: "node script.js",
+        commandArgv: ["node", "script.js"],
+        systemRunPlan: undefined,
+        nodeId: undefined,
+        allowedDecisions: ["allow-once", "deny"],
+      },
+    });
+
+    const requested = broadcasts.find((entry) => entry.event === "exec.approval.requested");
+    const id = (requested?.payload as { id?: string })?.id ?? "";
+    expect(id).not.toBe("");
+
+    const getRespond = vi.fn();
+    await getExecApproval({ handlers, id, respond: getRespond });
+
+    const approval = mockCallArg(getRespond, 0, 1) as Record<string, unknown>;
+    expect(approval.allowedDecisions).toEqual(["allow-once", "deny"]);
+
+    const denyAlwaysRespond = vi.fn();
+    await resolveExecApproval({
+      handlers,
+      id,
+      decision: "allow-always",
+      respond: denyAlwaysRespond,
+      context,
+    });
+    expect(mockCallArg(denyAlwaysRespond)).toBe(false);
+    expect((mockCallArg(denyAlwaysRespond, 0, 2) as { message?: string }).message).toBe(
+      "allow-always is unavailable because the effective policy requires approval every time",
+    );
+
+    const resolveRespond = vi.fn();
+    await resolveExecApproval({ handlers, id, respond: resolveRespond, context });
+    await requestPromise;
+  });
+
   it("attaches shared command analysis to gateway exec approval requests", async () => {
     const { handlers, broadcasts, respond, context } = createExecApprovalFixture();
 

@@ -9,7 +9,10 @@ import type { ExecToolDefaults } from "../../agents/bash-tools.js";
 import { resolveFastModeState } from "../../agents/fast-mode.js";
 import { resolveAgentHarnessPolicy } from "../../agents/harness/selection.js";
 import { listOpenAIAuthProfileProvidersForAgentRuntime } from "../../agents/openai-codex-routing.js";
-import { resolveEmbeddedFullAccessState } from "../../agents/pi-embedded-runner/sandbox-info.js";
+import {
+  resolveEmbeddedFullAccessState,
+  resolveEmbeddedSandboxInfoExecPolicy,
+} from "../../agents/pi-embedded-runner/sandbox-info.js";
 import type { EmbeddedFullAccessBlockedReason } from "../../agents/pi-embedded-runner/types.js";
 import { resolveIngressWorkspaceOverrideForSpawnedRun } from "../../agents/spawned-context.js";
 import type { SilentReplyPromptMode } from "../../agents/system-prompt.types.js";
@@ -266,6 +269,30 @@ export function buildExecOverridePromptHint(params: {
     .join("\n");
 }
 
+export function resolveReplyFullAccessState(params: {
+  cfg: OpenClawConfig;
+  agentId: string;
+  sessionKey?: string;
+  execOverrides?: ExecOverrides;
+  elevatedEnabled: boolean;
+  elevatedAllowed: boolean;
+  elevatedLevel: ElevatedLevel;
+}): ReturnType<typeof resolveEmbeddedFullAccessState> {
+  return resolveEmbeddedFullAccessState({
+    execElevated: {
+      enabled: params.elevatedEnabled,
+      allowed: params.elevatedAllowed,
+      defaultLevel: params.elevatedLevel,
+    },
+    execPolicy: resolveEmbeddedSandboxInfoExecPolicy({
+      config: params.cfg,
+      agentId: params.agentId,
+      sessionKey: params.sessionKey,
+      execOverrides: params.execOverrides,
+    }),
+  });
+}
+
 const piEmbeddedRuntimeLoader = createLazyImportLoader(
   () => import("../../agents/pi-embedded.runtime.js"),
 );
@@ -462,13 +489,14 @@ export async function runPreparedReply(
     cfg,
     isFastTestEnv: process.env.OPENCLAW_TEST_FAST === "1",
   });
-  const fullAccessState = resolveEmbeddedFullAccessState({
-    execElevated: {
-      enabled: elevatedEnabled,
-      allowed: elevatedAllowed,
-      defaultLevel: resolvedElevatedLevel ?? "off",
-    },
-    execPolicy: execOverrides,
+  const fullAccessState = resolveReplyFullAccessState({
+    cfg,
+    agentId,
+    sessionKey,
+    execOverrides,
+    elevatedEnabled,
+    elevatedAllowed,
+    elevatedLevel: resolvedElevatedLevel ?? "off",
   });
   let currentSystemSent = systemSent;
 

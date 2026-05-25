@@ -1412,6 +1412,7 @@ export async function runEmbeddedAttempt(
             ...buildEmbeddedAttemptToolRunContext({ ...params, trace: runTrace }),
             exec: {
               ...params.execOverrides,
+              config: params.config,
               elevated: params.bashElevated,
             },
             sandbox,

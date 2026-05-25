@@ -71,14 +71,53 @@ export function isClaudeCliProvider(providerId: string): boolean {
   return normalizeOptionalLowercaseString(providerId) === CLAUDE_CLI_BACKEND_ID;
 }
 
+type ExecPolicy = {
+  mode?: "deny" | "allowlist" | "ask" | "auto" | "full";
+  security?: "deny" | "allowlist" | "full";
+  ask?: "off" | "on-miss" | "always";
+};
+
+function resolveExecPolicyForMode(
+  mode: NonNullable<ExecPolicy["mode"]>,
+): Required<Pick<ExecPolicy, "security" | "ask">> {
+  switch (mode) {
+    case "deny":
+      return { security: "deny", ask: "off" };
+    case "allowlist":
+      return { security: "allowlist", ask: "off" };
+    case "ask":
+    case "auto":
+      return { security: "allowlist", ask: "on-miss" };
+    case "full":
+      return { security: "full", ask: "off" };
+  }
+}
+
+function applyExecPolicyLayer(base: ExecPolicy, layer?: ExecPolicy): ExecPolicy {
+  if (!layer) {
+    return base;
+  }
+  if (layer.mode) {
+    return { mode: layer.mode, ...resolveExecPolicyForMode(layer.mode) };
+  }
+  if (layer.security !== undefined || layer.ask !== undefined) {
+    return {
+      security: layer.security ?? base.security,
+      ask: layer.ask ?? base.ask,
+    };
+  }
+  return base;
+}
+
 function isOpenClawRequestedYolo(context?: CliBackendNormalizeConfigContext): boolean {
   const agentExec = context?.agentId
     ? context.config?.agents?.list?.find((agent) => agent.id === context.agentId)?.tools?.exec
     : undefined;
-  const exec = agentExec ?? context?.config?.tools?.exec;
-  const security = exec?.security ?? "full";
-  const ask = exec?.ask ?? "off";
-  return security === "full" && ask === "off";
+  const exec = applyExecPolicyLayer(
+    applyExecPolicyLayer({ security: "full", ask: "off" }, context?.config?.tools?.exec),
+    agentExec,
+  );
+  return exec.security === "full" && exec.ask === "off";
 }
 
 export function resolveClaudePermissionMode(context?: CliBackendNormalizeConfigContext): {

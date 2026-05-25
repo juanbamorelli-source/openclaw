@@ -121,6 +121,7 @@ const detectInterpreterInlineEvalArgvMock = vi.hoisted(() =>
 );
 
 vi.mock("../infra/exec-approvals.js", () => ({
+  ONE_TIME_EXEC_APPROVAL_DECISIONS: ["allow-once", "deny"],
   evaluateShellAllowlist: evaluateShellAllowlistMock,
   analyzeShellCommand: analyzeShellCommandMock,
   hasDurableExecApproval: hasDurableExecApprovalMock,
@@ -744,7 +745,129 @@ EOF`,
 
       expect(defaultExecAutoReviewerMock).not.toHaveBeenCalled();
       expect(createAndRegisterDefaultExecApprovalRequestMock).toHaveBeenCalledTimes(1);
+      expect(buildExecApprovalPendingToolResultMock).toHaveBeenCalledWith(
+        expect.objectContaining({ allowedDecisions: ["allow-once", "deny"] }),
+      );
       expect(result.pendingResult?.details.status).toBe("approval-pending");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed for cwd-changing script chains before approval", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-gateway-cwd-chain-"));
+    try {
+      fs.mkdirSync(path.join(tmp, "other"));
+      fs.writeFileSync(path.join(tmp, "read-info.js"), 'console.log("root");\n');
+      fs.writeFileSync(path.join(tmp, "other", "read-info.js"), 'console.log("other");\n');
+      evaluateShellAllowlistMock.mockReturnValue({
+        allowlistMatches: [],
+        analysisOk: true,
+        allowlistSatisfied: true,
+        segments: [
+          { resolution: null, argv: ["cd", "other"] },
+          { resolution: null, argv: ["node", "read-info.js"] },
+        ],
+        segmentAllowlistEntries: [
+          { pattern: "cd *", source: "allow-always" },
+          { pattern: "node *", source: "allow-always" },
+        ],
+      });
+      buildEnforcedShellCommandMock.mockReturnValue({
+        ok: true,
+        command: "cd other && node read-info.js",
+      });
+      hasDurableExecApprovalMock.mockReturnValue(true);
+      requiresExecApprovalMock.mockReturnValue(false);
+
+      const result = await runGatewayAllowlist({
+        command: "cd other && node read-info.js",
+        workdir: tmp,
+        ask: "on-miss",
+      });
+
+      expect(result.pendingResult?.details.status).toBe("failed");
+      expect(JSON.stringify(result.pendingResult)).toContain(
+        "SYSTEM_RUN_DENIED: approval cannot safely bind this interpreter/runtime command",
+      );
+      expect(runExecProcessMock).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed for cwd-changing extensionless script chains", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-gateway-cwd-extensionless-"));
+    try {
+      const toolsDir = path.join(tmp, "tools");
+      fs.mkdirSync(toolsDir);
+      fs.writeFileSync(path.join(toolsDir, "runner"), 'console.log("tool");\n');
+      evaluateShellAllowlistMock.mockReturnValue({
+        allowlistMatches: [],
+        analysisOk: true,
+        allowlistSatisfied: true,
+        segments: [
+          { resolution: null, argv: ["cd", "tools"] },
+          { resolution: null, argv: ["node", "runner"] },
+        ],
+        segmentAllowlistEntries: [
+          { pattern: "cd *", source: "allow-always" },
+          { pattern: "node *", source: "allow-always" },
+        ],
+      });
+      buildEnforcedShellCommandMock.mockReturnValue({
+        ok: true,
+        command: "cd tools && node runner",
+      });
+      hasDurableExecApprovalMock.mockReturnValue(true);
+      requiresExecApprovalMock.mockReturnValue(false);
+
+      const result = await runGatewayAllowlist({
+        command: "cd tools && node runner",
+        workdir: tmp,
+        ask: "on-miss",
+      });
+
+      expect(result.pendingResult?.details.status).toBe("failed");
+      expect(JSON.stringify(result.pendingResult)).toContain(
+        "SYSTEM_RUN_DENIED: approval requires an existing script operand",
+      );
+      expect(runExecProcessMock).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("allows cwd-changing chains without mutable script operands", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-gateway-cwd-non-script-"));
+    try {
+      fs.mkdirSync(path.join(tmp, "other"));
+      evaluateShellAllowlistMock.mockReturnValue({
+        allowlistMatches: [],
+        analysisOk: true,
+        allowlistSatisfied: true,
+        segments: [
+          { resolution: null, argv: ["cd", "other"] },
+          { resolution: null, argv: ["ls"] },
+        ],
+        segmentAllowlistEntries: [
+          { pattern: "cd *", source: "allow-always" },
+          { pattern: "ls", source: "allow-always" },
+        ],
+      });
+      buildEnforcedShellCommandMock.mockReturnValue({ ok: true, command: "cd other && ls" });
+      hasDurableExecApprovalMock.mockReturnValue(true);
+      requiresExecApprovalMock.mockReturnValue(false);
+
+      const result = await runGatewayAllowlist({
+        command: "cd other && ls",
+        workdir: tmp,
+        ask: "on-miss",
+      });
+
+      expect(result.pendingResult).toBeUndefined();
+      expect(result.deniedResult).toBeUndefined();
+      expect(result.execCommandOverride).toBe("cd other && ls");
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -799,6 +922,99 @@ EOF`,
         );
       });
       expect(runExecProcessMock).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("denies unbindable local Python module invocations in auto-review mode", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-gateway-python-module-"));
+    try {
+      const modulePath = path.join(tmp, "local_tool.py");
+      fs.writeFileSync(modulePath, 'print("reviewed")\n');
+      evaluateShellAllowlistMock.mockReturnValue({
+        allowlistMatches: [],
+        analysisOk: true,
+        allowlistSatisfied: false,
+        segments: [{ resolution: null, argv: ["python", "-m", "local_tool"] }],
+        segmentAllowlistEntries: [],
+      });
+      hasDurableExecApprovalMock.mockReturnValue(false);
+      requiresExecApprovalMock.mockReturnValue(true);
+
+      const result = await runGatewayAllowlist({
+        command: "python -m local_tool",
+        workdir: tmp,
+        ask: "on-miss",
+        autoReview: true,
+      });
+
+      expect(defaultExecAutoReviewerMock).not.toHaveBeenCalled();
+      expect(createAndRegisterDefaultExecApprovalRequestMock).not.toHaveBeenCalled();
+      expect(result.pendingResult?.details.status).toBe("failed");
+      expect(JSON.stringify(result.pendingResult)).toContain(
+        "SYSTEM_RUN_DENIED: approval cannot safely bind this interpreter/runtime command",
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps installed Python modules on the normal approval path", async () => {
+    evaluateShellAllowlistMock.mockReturnValue({
+      allowlistMatches: [],
+      analysisOk: true,
+      allowlistSatisfied: false,
+      segments: [{ resolution: null, argv: ["python", "-m", "pip", "--version"] }],
+      segmentAllowlistEntries: [],
+    });
+    hasDurableExecApprovalMock.mockReturnValue(false);
+    requiresExecApprovalMock.mockReturnValue(true);
+
+    const result = await runGatewayAllowlist({
+      command: "python -m pip --version",
+      ask: "on-miss",
+      autoReview: false,
+    });
+
+    expect(createAndRegisterDefaultExecApprovalRequestMock).toHaveBeenCalledTimes(1);
+    expect(result.pendingResult?.details.status).toBe("approval-pending");
+    expect(JSON.stringify(result.pendingResult)).not.toContain(
+      "SYSTEM_RUN_DENIED: approval cannot safely bind this interpreter/runtime command",
+    );
+  });
+
+  it("denies unbindable direct mutable script operands in auto-review mode", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-gateway-auto-unbindable-"));
+    try {
+      const scriptPath = path.join(tmp, "script.js");
+      const loaderPath = path.join(tmp, "loader.mjs");
+      fs.writeFileSync(scriptPath, 'console.log("reviewed");\n');
+      fs.writeFileSync(loaderPath, "export default {};\n");
+      const command = `node --loader ${loaderPath} ${scriptPath}`;
+      evaluateShellAllowlistMock.mockReturnValue({
+        allowlistMatches: [],
+        analysisOk: true,
+        allowlistSatisfied: false,
+        segments: [{ resolution: null, argv: ["node", "--loader", loaderPath, scriptPath] }],
+        segmentAllowlistEntries: [],
+      });
+      hasDurableExecApprovalMock.mockReturnValue(false);
+      requiresExecApprovalMock.mockReturnValue(true);
+
+      const result = await runGatewayAllowlist({
+        command,
+        workdir: tmp,
+        ask: "on-miss",
+        autoReview: true,
+      });
+
+      expect(defaultExecAutoReviewerMock).not.toHaveBeenCalled();
+      expect(createAndRegisterDefaultExecApprovalRequestMock).not.toHaveBeenCalled();
+      expect(result.pendingResult?.details.status).toBe("failed");
+      expect(JSON.stringify(result.pendingResult)).toContain(
+        "SYSTEM_RUN_DENIED: approval cannot safely bind this interpreter/runtime command",
+      );
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -968,6 +1184,9 @@ EOF`,
 
     expect(defaultExecAutoReviewerMock).not.toHaveBeenCalled();
     expect(createAndRegisterDefaultExecApprovalRequestMock).toHaveBeenCalledTimes(1);
+    expect(buildExecApprovalPendingToolResultMock).toHaveBeenCalledWith(
+      expect.objectContaining({ allowedDecisions: ["allow-once", "deny"] }),
+    );
     expect(result.pendingResult?.details.status).toBe("approval-pending");
   });
 

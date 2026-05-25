@@ -81,6 +81,7 @@ import {
   ensureCodexSandboxExecServerEnvironment,
   releaseCodexSandboxExecServerEnvironment,
 } from "./sandbox-exec-server.js";
+const __testing = testing;
 import { createSandboxContext } from "./sandbox-exec-server.test-helpers.js";
 import { readCodexAppServerBinding, writeCodexAppServerBinding } from "./session-binding.js";
 import { createCodexTestModel } from "./test-support.js";
@@ -6914,6 +6915,27 @@ describe("runCodexAppServerAttempt", () => {
     const run = runCodexAppServerAttempt(createParams(sessionFile, workspaceDir), {
       pluginConfig: { appServer: { mode: "yolo" } },
     });
+    await harness.waitForMethod("turn/start");
+    await harness.completeTurn({ threadId: "thread-1", turnId: "turn-1" });
+    await run;
+
+    const startRequest = harness.requests.find((request) => request.method === "thread/start");
+    const startParams = startRequest?.params as Record<string, unknown> | undefined;
+    expect(startParams?.approvalPolicy).toBe("never");
+    expect(startParams?.sandbox).toBe("danger-full-access");
+  });
+
+  it("keeps normalized full exec mode unpromoted when OpenClaw tool policy exists", async () => {
+    initializeGlobalHookRunner(
+      createMockPluginRegistry([{ hookName: "before_tool_call", handler: vi.fn() }]),
+    );
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const harness = createStartedThreadHarness();
+    const params = createParams(sessionFile, workspaceDir);
+    params.config = { tools: { exec: { mode: "full" } } } as never;
+
+    const run = runCodexAppServerAttempt(params);
     await harness.waitForMethod("turn/start");
     await harness.completeTurn({ threadId: "thread-1", turnId: "turn-1" });
     await run;

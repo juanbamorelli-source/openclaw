@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { analyzeShellCommand } from "../infra/exec-approvals-analysis.js";
 import type {
   SystemRunApprovalFileOperand,
   SystemRunApprovalPlan,
@@ -929,6 +930,10 @@ function shellPayloadNeedsStableBinding(shellCommand: string, cwd: string | unde
   const argv = splitShellArgs(shellCommand);
   if (!argv || argv.length === 0) {
     return false;
+  }
+  const analysis = analyzeShellCommand({ command: shellCommand, cwd, platform: process.platform });
+  if (!analysis.ok || analysis.segments.length > 1 || (analysis.chains?.length ?? 1) > 1) {
+    return true;
   }
   const snapshot = resolveMutableFileOperandSnapshotSync({
     argv,

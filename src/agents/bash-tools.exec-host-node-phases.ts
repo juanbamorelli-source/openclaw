@@ -332,14 +332,38 @@ export async function analyzeNodeApprovalRequirement(params: {
       env: params.request.env,
       segments: baseAllowlistEval.segments,
     }) && !(params.hostSecurity === "full" && params.hostAsk === "off");
-  const mutableScriptApprovalBindings:
+  const localMutableScriptApprovalBindings = resolveMutableScriptApprovalBindings({
+    cwd: params.prepared.cwd ?? params.request.workdir,
+    segments: baseAllowlistEval.segments,
+  });
+  let mutableScriptApprovalBindings:
     | { ok: true; bindings: MutableScriptApprovalBinding[] }
     | { ok: false; message: string } = params.target.supportsSystemRunPrepare
     ? { ok: true, bindings: [] }
-    : resolveMutableScriptApprovalBindings({
-        cwd: params.prepared.cwd ?? params.request.workdir,
-        segments: baseAllowlistEval.segments,
-      });
+    : localMutableScriptApprovalBindings;
+  if (
+    !params.target.supportsSystemRunPrepare &&
+    mutableScriptApprovalBindings.ok &&
+    mutableScriptApprovalBindings.bindings.length > 0
+  ) {
+    mutableScriptApprovalBindings = {
+      ok: false,
+      message:
+        "SYSTEM_RUN_DENIED: node exec approval requires system.run.prepare for interpreter/runtime script operands",
+    };
+  }
+  if (params.target.supportsSystemRunPrepare && params.prepared.plan.mutableFileOperand == null) {
+    const localNeedsBinding =
+      !localMutableScriptApprovalBindings.ok ||
+      localMutableScriptApprovalBindings.bindings.length > 0;
+    if (localNeedsBinding) {
+      mutableScriptApprovalBindings = {
+        ok: false,
+        message:
+          "SYSTEM_RUN_DENIED: node exec approval requires system.run.prepare to return mutable script operand binding",
+      };
+    }
+  }
   const requiresMutableScriptApproval =
     (params.prepared.plan.mutableFileOperand != null ||
       !mutableScriptApprovalBindings.ok ||

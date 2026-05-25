@@ -85,7 +85,6 @@ type CodexConversationStartParams = {
   sessionFile: string;
   workspaceDir?: string;
   agentDir?: string;
-  agentId?: string;
   sessionKey?: string;
   threadId?: string;
   model?: string;
@@ -131,14 +130,13 @@ async function resolveConversationAppServerRuntime(params: {
           workspaceDir: params.workspaceDir,
         })
       : undefined;
-  return {
+  const runtime = resolveCodexAppServerRuntimeOptions({
+    pluginConfig: params.pluginConfig,
     execPolicy,
-    runtime: resolveCodexAppServerRuntimeOptions({
-      pluginConfig: params.pluginConfig,
-      execPolicy,
-      openClawSandboxActive: sandboxForPolicy?.enabled === true,
-    }),
-  };
+    openClawSandboxActive: sandboxForPolicy?.enabled === true,
+  });
+  assertNativeConversationApprovalPolicySupported({ execPolicy, runtime });
+  return { execPolicy, runtime };
 }
 
 const CODEX_CONVERSATION_GLOBAL_STATE = Symbol.for("openclaw.codex.conversationBinding");
@@ -179,7 +177,6 @@ export async function startCodexConversationThread(
       sandbox: params.sandbox,
       serviceTier: params.serviceTier,
       config: params.config,
-      agentId: params.agentId,
       sessionKey: params.sessionKey,
     });
   } else {
@@ -195,7 +192,6 @@ export async function startCodexConversationThread(
       sandbox: params.sandbox,
       serviceTier: params.serviceTier,
       config: params.config,
-      agentId: params.agentId,
       sessionKey: params.sessionKey,
     });
   }
@@ -320,7 +316,7 @@ async function attachExistingThread(params: {
   agentId?: string;
   sessionKey?: string;
 }): Promise<void> {
-  const { runtime } = await resolveConversationAppServerRuntime({
+  const { execPolicy, runtime } = await resolveConversationAppServerRuntime({
     pluginConfig: params.pluginConfig,
     config: params.config,
     agentId: params.agentId,
@@ -345,9 +341,11 @@ async function attachExistingThread(params: {
       threadId: params.threadId,
       ...(params.model ? { model: params.model } : {}),
       ...(modelProvider ? { modelProvider } : {}),
-      approvalPolicy: params.approvalPolicy ?? runtime.approvalPolicy,
+      approvalPolicy: execPolicy?.touched
+        ? runtime.approvalPolicy
+        : (params.approvalPolicy ?? runtime.approvalPolicy),
       approvalsReviewer: runtime.approvalsReviewer,
-      sandbox: params.sandbox ?? runtime.sandbox,
+      sandbox: execPolicy?.touched ? runtime.sandbox : (params.sandbox ?? runtime.sandbox),
       ...((params.serviceTier ?? runtime.serviceTier)
         ? { serviceTier: params.serviceTier ?? runtime.serviceTier }
         : {}),
@@ -370,8 +368,10 @@ async function attachExistingThread(params: {
         modelProvider: response.modelProvider ?? params.modelProvider,
         ...agentLookup,
       }),
-      approvalPolicy: params.approvalPolicy ?? runtimeApprovalPolicy,
-      sandbox: params.sandbox ?? runtime.sandbox,
+      approvalPolicy: execPolicy?.touched
+        ? runtimeApprovalPolicy
+        : (params.approvalPolicy ?? runtimeApprovalPolicy),
+      sandbox: execPolicy?.touched ? runtime.sandbox : (params.sandbox ?? runtime.sandbox),
       serviceTier: params.serviceTier ?? runtime.serviceTier,
     },
     {
@@ -395,7 +395,7 @@ async function createThread(params: {
   agentId?: string;
   sessionKey?: string;
 }): Promise<void> {
-  const { runtime } = await resolveConversationAppServerRuntime({
+  const { execPolicy, runtime } = await resolveConversationAppServerRuntime({
     pluginConfig: params.pluginConfig,
     config: params.config,
     agentId: params.agentId,
@@ -420,9 +420,11 @@ async function createThread(params: {
       cwd: params.workspaceDir,
       ...(params.model ? { model: params.model } : {}),
       ...(modelProvider ? { modelProvider } : {}),
-      approvalPolicy: params.approvalPolicy ?? runtime.approvalPolicy,
+      approvalPolicy: execPolicy?.touched
+        ? runtime.approvalPolicy
+        : (params.approvalPolicy ?? runtime.approvalPolicy),
       approvalsReviewer: runtime.approvalsReviewer,
-      sandbox: params.sandbox ?? runtime.sandbox,
+      sandbox: execPolicy?.touched ? runtime.sandbox : (params.sandbox ?? runtime.sandbox),
       ...((params.serviceTier ?? runtime.serviceTier)
         ? { serviceTier: params.serviceTier ?? runtime.serviceTier }
         : {}),
@@ -447,8 +449,10 @@ async function createThread(params: {
         modelProvider: response.modelProvider ?? params.modelProvider,
         ...agentLookup,
       }),
-      approvalPolicy: params.approvalPolicy ?? runtimeApprovalPolicy,
-      sandbox: params.sandbox ?? runtime.sandbox,
+      approvalPolicy: execPolicy?.touched
+        ? runtimeApprovalPolicy
+        : (params.approvalPolicy ?? runtimeApprovalPolicy),
+      sandbox: execPolicy?.touched ? runtime.sandbox : (params.sandbox ?? runtime.sandbox),
       serviceTier: params.serviceTier ?? runtime.serviceTier,
     },
     {

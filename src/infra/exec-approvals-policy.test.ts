@@ -22,6 +22,7 @@ import {
   normalizeExecTarget,
   normalizeExecSecurity,
   requiresExecApproval,
+  resolveExecApprovalRequestAllowedDecisions,
   resolveExecModeFromPolicy,
   resolveExecModePolicy,
   resolveExecPolicyForMode,
@@ -166,6 +167,23 @@ describe("exec approvals policy helpers", () => {
     },
   ])("maps explicit exec mode to effective policy %j", ({ mode, expected }) => {
     expect(resolveExecPolicyForMode(mode)).toEqual(expected);
+  });
+
+  it("intersects explicit approval decisions with ask policy", () => {
+    expect(
+      resolveExecApprovalRequestAllowedDecisions({
+        ask: "always",
+        allowedDecisions: ["allow-once", "allow-always", "deny"],
+      }),
+    ).toEqual(["allow-once", "deny"]);
+  });
+
+  it("keeps deny available for explicit exec approval decision lists", () => {
+    expect(
+      resolveExecApprovalRequestAllowedDecisions({
+        allowedDecisions: ["allow-once"],
+      }),
+    ).toEqual(["allow-once", "deny"]);
   });
 
   it("preserves legacy security and ask when no explicit mode is set", () => {

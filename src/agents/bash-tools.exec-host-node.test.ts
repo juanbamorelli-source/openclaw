@@ -97,6 +97,9 @@ const detectInterpreterInlineEvalArgvMock = vi.hoisted(() =>
     } | null => null,
   ),
 );
+const buildNodeShellCommandMock = vi.hoisted(() =>
+  vi.fn(() => ["/bin/sh", "-lc", "bun ./script.ts"]),
+);
 const defaultExecAutoReviewerMock = vi.hoisted(() =>
   vi.fn<ExecAutoReviewer>(async () => ({
     decision: "allow-once",
@@ -106,6 +109,7 @@ const defaultExecAutoReviewerMock = vi.hoisted(() =>
 );
 
 vi.mock("../infra/exec-approvals.js", () => ({
+  ONE_TIME_EXEC_APPROVAL_DECISIONS: ["allow-once", "deny"],
   evaluateShellAllowlist: evaluateShellAllowlistMock,
   hasDurableExecApproval: vi.fn(() => false),
   requiresExecApproval: requiresExecApprovalMock,
@@ -126,7 +130,7 @@ vi.mock("../infra/exec-auto-review.js", () => ({
 }));
 
 vi.mock("../infra/node-shell.js", () => ({
-  buildNodeShellCommand: vi.fn(() => ["/bin/sh", "-lc", "bun ./script.ts"]),
+  buildNodeShellCommand: buildNodeShellCommandMock,
 }));
 
 vi.mock("../infra/system-run-approval-context.js", () => ({
@@ -353,6 +357,8 @@ describe("executeNodeHostCommand", () => {
       segments: [{ resolution: null, argv: ["bun", "./script.ts"] }],
       segmentAllowlistEntries: [],
     });
+    buildNodeShellCommandMock.mockReset();
+    buildNodeShellCommandMock.mockReturnValue(["/bin/sh", "-lc", "bun ./script.ts"]);
     defaultExecAutoReviewerMock.mockReset();
     defaultExecAutoReviewerMock.mockResolvedValue({
       decision: "allow-once",
@@ -491,13 +497,8 @@ describe("executeNodeHostCommand", () => {
     expect(runParams.approvalDecision).toBe("allow-once");
     const approvalRequest = requireRegisteredApprovalRequest();
     expect(approvalRequest.requireDeliveryRoute).toBe(false);
+    expect(approvalRequest.suppressDelivery).toBe(true);
     expect(runParams.runId).toBe(approvalRequest.approvalId);
-    expect(callGatewayToolMock.mock.calls).toContainEqual([
-      "exec.approval.resolve",
-      expect.objectContaining({ timeoutMs: expect.any(Number) }),
-      { id: runParams.runId, decision: "allow-once" },
-      { scopes: ["operator.approvals"] },
-    ]);
   });
 
   it("keeps unparsable node commands on explicit approval in auto-review mode", async () => {
@@ -630,6 +631,16 @@ describe("executeNodeHostCommand", () => {
     expect(registerExecApprovalRequestForHostOrThrowMock).toHaveBeenCalledTimes(1);
     expect(createAndRegisterDefaultExecApprovalRequestMock).not.toHaveBeenCalled();
     expect(result.details?.status).toBe("completed");
+    expect(
+      callGatewayToolMock.mock.calls.some(([method]) => method === "exec.approval.resolve"),
+    ).toBe(true);
+    const runParams = requireRunParams(requireGatewayCommand("system.run"));
+    expect(runParams.approved).toBe(true);
+    expect(runParams.approvalDecision).toBe("allow-once");
+    const approvalRequest = requireRegisteredApprovalRequest();
+    expect(approvalRequest.requireDeliveryRoute).toBe(false);
+    expect(approvalRequest.suppressDelivery).toBe(true);
+    expect(runParams.runId).toBe(approvalRequest.approvalId);
   });
 
   it("keeps mutable script operands on explicit approval in node auto-review mode", async () => {
@@ -679,6 +690,51 @@ describe("executeNodeHostCommand", () => {
     expect(result.details?.status).toBe("approval-pending");
   });
 
+  it("fails closed when a prepared node omits required mutable script binding", async () => {
+    resolveExecHostApprovalContextMock.mockReturnValue({
+      approvals: { allowlist: [], file: { version: 1, agents: {} } },
+      hostSecurity: "allowlist",
+      hostAsk: "on-miss",
+      askFallback: "deny",
+    });
+    parsePreparedSystemRunPayloadMock.mockReturnValue({
+      plan: {
+        ...preparedPlan,
+        argv: ["node", "/tmp/work/script.js"],
+        commandText: "node /tmp/work/script.js",
+        commandPreview: "node /tmp/work/script.js",
+        mutableFileOperand: null,
+      },
+    });
+    evaluateShellAllowlistMock.mockReturnValue({
+      allowlistMatches: [],
+      analysisOk: true,
+      allowlistSatisfied: false,
+      segments: [{ resolution: null, argv: ["node", "/tmp/work/script.js"] }],
+      segmentAllowlistEntries: [],
+    });
+
+    const result = await executeNodeHostCommand({
+      command: "node /tmp/work/script.js",
+      workdir: "/tmp/work",
+      env: {},
+      security: "allowlist",
+      ask: "on-miss",
+      autoReview: true,
+      defaultTimeoutSec: 30,
+      approvalRunningNoticeMs: 0,
+      warnings: [],
+      agentId: "requested-agent",
+      sessionKey: "requested-session",
+    });
+
+    expect(result.details?.status).toBe("failed");
+    expect(JSON.stringify(result.content)).toContain(
+      "SYSTEM_RUN_DENIED: node exec approval requires system.run.prepare to return mutable script operand binding",
+    );
+    expect(createAndRegisterDefaultExecApprovalRequestMock).not.toHaveBeenCalled();
+  });
+
   it("requires approval for allowlisted mutable script operands on node", async () => {
     resolveExecHostApprovalContextMock.mockReturnValue({
       approvals: { allowlist: [], file: { version: 1, agents: {} } },
@@ -724,6 +780,9 @@ describe("executeNodeHostCommand", () => {
 
     expect(defaultExecAutoReviewerMock).not.toHaveBeenCalled();
     expect(createAndRegisterDefaultExecApprovalRequestMock).toHaveBeenCalledTimes(1);
+    expect(buildExecApprovalPendingToolResultMock).toHaveBeenCalledWith(
+      expect.objectContaining({ allowedDecisions: ["allow-once", "deny"] }),
+    );
     expect(result.details?.status).toBe("approval-pending");
   });
 
@@ -802,6 +861,9 @@ describe("executeNodeHostCommand", () => {
 
     expect(defaultExecAutoReviewerMock).not.toHaveBeenCalled();
     expect(createAndRegisterDefaultExecApprovalRequestMock).toHaveBeenCalledTimes(1);
+    expect(buildExecApprovalPendingToolResultMock).toHaveBeenCalledWith(
+      expect.objectContaining({ allowedDecisions: ["allow-once", "deny"] }),
+    );
     expect(result.details?.status).toBe("approval-pending");
     expect(warnings).toContain(
       "Warning: security audit suppression changes require explicit approval unless exec is running in yolo mode.",
@@ -860,7 +922,7 @@ describe("executeNodeHostCommand", () => {
     );
   });
 
-  it("builds a local systemRunPlan when approval is required and the node omits prepare", async () => {
+  it("builds a local systemRunPlan for non-script approval when the node omits prepare", async () => {
     listNodesMock.mockResolvedValueOnce([
       {
         nodeId: "node-1",
@@ -874,9 +936,17 @@ describe("executeNodeHostCommand", () => {
       hostAsk: "always",
       askFallback: "deny",
     });
+    buildNodeShellCommandMock.mockReturnValueOnce(["/bin/sh", "-lc", "pwd"]);
+    evaluateShellAllowlistMock.mockReturnValueOnce({
+      allowlistMatches: [],
+      analysisOk: true,
+      allowlistSatisfied: false,
+      segments: [{ resolution: null, argv: ["pwd"] }],
+      segmentAllowlistEntries: [],
+    });
 
     const result = await executeNodeHostCommand({
-      command: "bun ./script.ts",
+      command: "pwd",
       workdir: "/tmp/work",
       env: {},
       security: "full",
@@ -891,10 +961,10 @@ describe("executeNodeHostCommand", () => {
     expect(result.details?.status).toBe("approval-pending");
     expect(parsePreparedSystemRunPayloadMock).not.toHaveBeenCalled();
     const expectedPlan = {
-      argv: ["/bin/sh", "-lc", "bun ./script.ts"],
+      argv: ["/bin/sh", "-lc", "pwd"],
       cwd: "/tmp/work",
-      commandText: '/bin/sh -lc "bun ./script.ts"',
-      commandPreview: "bun ./script.ts",
+      commandText: "/bin/sh -lc pwd",
+      commandPreview: "pwd",
       agentId: "requested-agent",
       sessionKey: "requested-session",
     };
@@ -1142,7 +1212,7 @@ describe("executeNodeHostCommand", () => {
     expect(systemRunCalls).toHaveLength(0);
   });
 
-  it("revalidates old-node mutable script bindings after approval", async () => {
+  it("fails closed for old-node mutable script operands", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-node-mutable-revalidate-"));
     try {
       const scriptPath = path.join(tmp, "script.js");
@@ -1167,11 +1237,6 @@ describe("executeNodeHostCommand", () => {
         segments: [{ resolution: null, argv: ["node", scriptPath] }],
         segmentAllowlistEntries: [],
       });
-      resolveApprovalDecisionOrUndefinedMock.mockImplementation(async () => {
-        fs.writeFileSync(scriptPath, 'console.log("changed");\n');
-        return "allow-once";
-      });
-
       const result = await executeNodeHostCommand({
         command: `node ${scriptPath}`,
         workdir: tmp,
@@ -1185,13 +1250,11 @@ describe("executeNodeHostCommand", () => {
         sessionKey: "requested-session",
       });
 
-      expect(result.details?.status).toBe("approval-pending");
-      await vi.waitFor(() => {
-        expect(sendExecApprovalFollowupResultMock).toHaveBeenCalledWith(
-          { approvalId: "approval-1" },
-          `Exec denied (node=node-1 id=approval-1, approval script operand changed before execution): node ${scriptPath}`,
-        );
-      });
+      expect(result.details?.status).toBe("failed");
+      expect(JSON.stringify(result.content)).toContain(
+        "SYSTEM_RUN_DENIED: node exec approval requires system.run.prepare for interpreter/runtime script operands",
+      );
+      expect(createAndRegisterDefaultExecApprovalRequestMock).not.toHaveBeenCalled();
       const systemRunCalls = callGatewayToolMock.mock.calls.filter(
         ([method, , params]) =>
           method === "node.invoke" &&

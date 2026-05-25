@@ -3,10 +3,7 @@
 import { nothing, render } from "lit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "../../i18n/index.ts";
-import {
-  getRenderedModalDialog,
-  installDialogPolyfill,
-} from "../../test-helpers/modal-dialog.ts";
+import { getRenderedModalDialog, installDialogPolyfill } from "../../test-helpers/modal-dialog.ts";
 import { createStorageMock } from "../../test-helpers/storage.ts";
 import type { AppViewState } from "../app-view-state.ts";
 import type { ExecApprovalRequest } from "../controllers/exec-approval.ts";
@@ -109,6 +106,22 @@ describe("approval and confirmation modals", () => {
     );
   });
 
+  it("hides unavailable exec approval decisions", async () => {
+    const request = createExecRequest();
+    request.request.allowedDecisions = ["allow-once", "deny"];
+
+    render(renderExecApprovalPrompt(createExecState({ execApprovalQueue: [request] })), container);
+
+    await getRenderedDialog();
+
+    const buttonLabels = [...container.querySelectorAll("button")].map((button) =>
+      button.textContent?.trim(),
+    );
+    expect(buttonLabels).toContain("Allow once");
+    expect(buttonLabels).toContain("Deny");
+    expect(buttonLabels).not.toContain("Always allow");
+  });
+
   it("renders command spans in exec approvals", async () => {
     const request = createExecRequest();
     request.request.command = 'ls | grep "stuff" | python -c \'print("hi")\'';
@@ -128,6 +141,23 @@ describe("approval and confirmation modals", () => {
       (span) => span.textContent,
     );
     expect(spans).toEqual(["ls", "python -c"]);
+  });
+
+  it("does not map Escape to deny when denial is unavailable", async () => {
+    const request = createExecRequest();
+    request.request.allowedDecisions = ["allow-once"];
+    const handleExecApprovalDecision = vi.fn(async () => undefined);
+    render(
+      renderExecApprovalPrompt(
+        createExecState({ execApprovalQueue: [request], handleExecApprovalDecision }),
+      ),
+      container,
+    );
+
+    const { dialog } = await getRenderedDialog();
+    dispatchEscape(dialog);
+
+    expect(handleExecApprovalDecision).not.toHaveBeenCalled();
   });
 
   it("maps Escape to exec denial when approval is idle", async () => {

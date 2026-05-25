@@ -22,6 +22,7 @@ import {
   type ExecAsk,
   type ExecCommandSegment,
   type ExecMode,
+  type ExecSegmentSatisfiedBy,
   type ExecSecurity,
   type SkillBinTrustEntry,
 } from "../infra/exec-approvals.js";
@@ -136,7 +137,8 @@ type SystemRunPolicyPhase = SystemRunParsePhase & {
 type MutableFileOperandSnapshotResult = ReturnType<typeof resolveMutableFileOperandSnapshotSync>;
 
 function resolveSecurityAuditSuppressionCommandText(parsed: SystemRunParsePhase): string {
-  return parsed.shellPayload ?? extractShellWrapperInlineCommand(parsed.argv) ?? parsed.commandText;
+  const shellPayload = parsed.shellPayload ?? extractShellWrapperInlineCommand(parsed.argv);
+  return shellPayload ? `${shellPayload} ${parsed.argv.join(" ")}` : parsed.commandText;
 }
 
 const safeBinTrustedDirWarningCache = new Set<string>();
@@ -330,7 +332,7 @@ function resolveUnplannedMutableFileOperandSnapshot(params: {
     shellCommand: params.shellPayload,
   });
   if (!snapshot.ok) {
-    return params.shellPayload === null ? null : snapshot;
+    return snapshot;
   }
   return snapshot.snapshot ? snapshot : null;
 }
@@ -338,22 +340,22 @@ function resolveUnplannedMutableFileOperandSnapshot(params: {
 function resolveExpectedMutableFileOperandSnapshot(
   phase: SystemRunPolicyPhase,
 ): MutableFileOperandSnapshotResult | null {
+  const inlineEvalHit = phase.inlineEvalHit ?? detectPolicyInlineEval(phase.segments);
   if (
     phase.approvalPlan ||
     phase.approvalDecision === "allow-once" ||
-    (phase.approvalDecision === "allow-always" && phase.inlineEvalHit === null)
+    (phase.approvalDecision === "allow-always" && inlineEvalHit === null)
   ) {
+    if (inlineEvalHit !== null) {
+      return null;
+    }
     return resolveMutableFileOperandSnapshotSync({
       argv: phase.argv,
       cwd: phase.cwd,
       shellCommand: phase.shellPayload,
     });
   }
-  if (
-    phase.inlineEvalHit !== null ||
-    phase.policy.approvedByAsk ||
-    (phase.security === "full" && phase.ask === "off")
-  ) {
+  if (inlineEvalHit !== null || (phase.security === "full" && phase.ask === "off")) {
     return null;
   }
   return resolveUnplannedMutableFileOperandSnapshot({

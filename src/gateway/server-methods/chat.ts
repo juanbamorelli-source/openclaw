@@ -113,11 +113,9 @@ import {
 } from "../protocol/index.js";
 import { CHAT_SEND_SESSION_KEY_MAX_LENGTH } from "../protocol/schema/primitives.js";
 import { getMaxChatHistoryMessagesBytes } from "../server-constants.js";
-import { persistGatewaySessionLifecycleEvent } from "../session-lifecycle-state.js";
 import { readSessionTranscriptIndex } from "../session-transcript-index.fs.js";
 import {
   capArrayByJsonBytes,
-  loadGatewaySessionRow,
   loadSessionEntry,
   resolveGatewayModelSupportsImages,
   resolveGatewaySessionThinkingDefault,
@@ -2092,33 +2090,8 @@ function broadcastChatError(params: {
   params.context.agentRunSeq.delete(params.runId);
 }
 
-export function resolveChatDispatchErrorFailureMode(params: {
-  aborted: boolean;
-  dispatchCompleted: boolean;
-  agentRunStarted: boolean;
-}): "skip-aborted" | "skip-completed-agent-cleanup" | "fail-session" {
-  if (params.aborted) {
-    return "skip-aborted";
-  }
-  if (params.dispatchCompleted && params.agentRunStarted) {
-    return "skip-completed-agent-cleanup";
-  }
-  return "fail-session";
-}
-
-function cacheCompletedChatRun(params: {
-  context: Pick<GatewayRequestContext, "dedupe">;
-  runId: string;
-}) {
-  setGatewayDedupeEntry({
-    dedupe: params.context.dedupe,
-    key: `chat:${params.runId}`,
-    entry: {
-      ts: Date.now(),
-      ok: true,
-      payload: { runId: params.runId, status: "ok" as const },
-    },
-  });
+function isSourceReplyTranscriptMirrorPayload(payload: ReplyPayload | undefined) {
+  return Boolean(payload && getReplyPayloadMetadata(payload)?.sourceReplyTranscriptMirror);
 }
 
 export const chatHandlers: GatewayRequestHandlers = {
@@ -2754,7 +2727,6 @@ export const chatHandlers: GatewayRequestHandlers = {
       let appendedWebchatAgentMedia = false;
       let userTranscriptUpdatePromise: Promise<void> | null = null;
       let agentRunStarted = false;
-      let dispatchCompleted = false;
       const hasBeforeAgentRunGate = getGlobalHookRunner()?.hasHooks("before_agent_run") === true;
       const emitUserTranscriptUpdate = async () => {
         if (userTranscriptUpdatePromise) {
@@ -3008,7 +2980,6 @@ export const chatHandlers: GatewayRequestHandlers = {
         },
       )
         .then(async () => {
-          dispatchCompleted = true;
           await measureDiagnosticsTimelineSpan(
             "gateway.chat_send.post_dispatch",
             async () => {
@@ -3539,7 +3510,28 @@ export const chatHandlers: GatewayRequestHandlers = {
                 await emitUserTranscriptUpdateAfterAgentRun();
               }
               if (!context.chatAbortedRuns.has(clientRunId)) {
-                cacheCompletedChatRun({ context, runId: clientRunId });
+                const returnedAgentError = shouldBroadcastAgentError
+                  ? errorShape(
+                      ErrorCodes.UNAVAILABLE,
+                      returnedAgentErrorMessage ?? "agent returned an error payload",
+                    )
+                  : undefined;
+                setGatewayDedupeEntry({
+                  dedupe: context.dedupe,
+                  key: `chat:${clientRunId}`,
+                  entry: {
+                    ts: Date.now(),
+                    ok: !shouldBroadcastAgentError,
+                    payload: shouldBroadcastAgentError
+                      ? {
+                          runId: clientRunId,
+                          status: "error" as const,
+                          summary: returnedAgentErrorMessage ?? "agent returned an error payload",
+                        }
+                      : { runId: clientRunId, status: "ok" as const },
+                    ...(returnedAgentError ? { error: returnedAgentError } : {}),
+                  },
+                });
               }
             },
             {
@@ -3564,69 +3556,7 @@ export const chatHandlers: GatewayRequestHandlers = {
               `webchat user transcript update failed after error: ${formatForLog(transcriptErr)}`,
             );
           });
-          const failureMode = resolveChatDispatchErrorFailureMode({
-            aborted: context.chatAbortedRuns.has(clientRunId),
-            dispatchCompleted,
-            agentRunStarted,
-          });
-          if (failureMode === "skip-aborted") {
-            return;
-          }
-          if (failureMode === "skip-completed-agent-cleanup") {
-            cacheCompletedChatRun({ context, runId: clientRunId });
-            context.logGateway.warn(
-              `webchat post-dispatch cleanup failed after agent run completion: ${formatForLog(err)}`,
-            );
-            return;
-          }
           const error = errorShape(ErrorCodes.UNAVAILABLE, String(err));
-          const endedAt = Date.now();
-          const lifecycleStartedAt = activeRunAbort.entry?.startedAtMs ?? now;
-          await persistGatewaySessionLifecycleEvent({
-            sessionKey,
-            event: {
-              ts: endedAt,
-              data: {
-                phase: "error",
-                startedAt: lifecycleStartedAt,
-                endedAt,
-                error: String(err),
-              },
-            },
-          }).catch((persistErr) => {
-            context.logGateway.warn(
-              `webchat session lifecycle persist failed after error: ${formatForLog(persistErr)}`,
-            );
-          });
-          const failedSessionRow = loadGatewaySessionRow(sessionKey);
-          const sessionEventConnIds = context.getSessionEventSubscriberConnIds();
-          if (sessionEventConnIds.size > 0) {
-            context.broadcastToConnIds(
-              "sessions.changed",
-              {
-                sessionKey,
-                ...(failedSessionRow
-                  ? {
-                      session: failedSessionRow,
-                      sessionId: failedSessionRow.sessionId,
-                      kind: failedSessionRow.kind,
-                    }
-                  : {}),
-                phase: "error",
-                runId: clientRunId,
-                ts: endedAt,
-                updatedAt: endedAt,
-                status: "failed",
-                startedAt: lifecycleStartedAt,
-                endedAt,
-                runtimeMs: Math.max(0, endedAt - lifecycleStartedAt),
-                abortedLastRun: false,
-                hasActiveRun: false,
-              },
-              sessionEventConnIds,
-              { dropIfSlow: true },
-            );
-          }
           setGatewayDedupeEntry({
             dedupe: context.dedupe,
             key: `chat:${clientRunId}`,

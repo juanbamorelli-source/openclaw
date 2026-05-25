@@ -340,6 +340,16 @@ async function compactCodexNativeThread(
   params: CompactEmbeddedPiSessionParams,
   options: { pluginConfig?: unknown; clientFactory?: CodexAppServerClientFactory } = {},
 ): Promise<EmbeddedPiCompactResult | undefined> {
+  const nativeExecutionBlock = resolveCodexNativeExecutionBlock({
+    config: params.config,
+    sessionKey: params.sandboxSessionKey ?? params.sessionKey,
+    sessionId: params.sessionId,
+    execOverrides: params.execOverrides,
+    surface: "native compaction",
+  });
+  if (nativeExecutionBlock) {
+    return { ok: false, compacted: false, reason: nativeExecutionBlock };
+  }
   const { sessionAgentId } = resolveSessionAgentIds({
     sessionKey: params.sessionKey,
     config: params.config,

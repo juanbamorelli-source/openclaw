@@ -7,9 +7,9 @@ Docs: https://docs.openclaw.ai
 ### Changes
 
 ### Fixes
+
 - iMessage: mark authorized slash-command turns as text-sourced commands so `/status`, `/new`, and `/restart` acknowledgements return to the source conversation. (#82642) thanks @homer-byte.
 - Crabbox: install Corepack shims into the writable hydration `PNPM_HOME` so local AWS runner hydration no longer tries to overwrite `/usr/local/bin/pnpm`.
-
 
 ## 2026.5.24
 
@@ -487,6 +487,14 @@ Docs: https://docs.openclaw.ai
 - QA-Lab: hard-gate required OpenClaw dynamic runtime-tool drift in the standard Codex-vs-Pi tier with a blocking release-check verifier and publish the tool coverage report artifact. Fixes #80339; refs #80319. Thanks @100yenadmin.
 - QA-Lab: add the personal-agent approval-denial scenario so the benchmark pack verifies denied local reads stop cleanly without tool progress or fixture leaks. (#83150) Thanks @iFiras-Max1.
 - Exec/Codex harness: add normalized `tools.exec.mode`, including native `auto` review for exec approval misses and Codex app-server mapping from OpenClaw `auto` to Guardian-reviewed approvals.
+- QA-Lab: extend the personal-agent benchmark pack with a local task followthrough scenario for proof-backed pending, blocked, and done status reporting. Thanks @iFiras-Max1.
+- QA-Lab: add a report-only dreaming shadow-trial scenario so candidate memory promotion can be evaluated without mutating `MEMORY.md`. Thanks @iFiras-Max1.
+- Gateway/performance: add `pnpm test:restart:gateway` benchmark tooling for repeated restart readiness, downtime, trace, and resource-slope evidence. (#83299) Thanks @samzong.
+- Android: switch Talk Mode to realtime Gateway relay voice sessions with streaming mic input, realtime audio playback, tool-result bridging, and on-screen transcripts. (#83130) Thanks @sliekens.
+- Gateway/config: expose config lookup reload metadata so tools can distinguish restart-required, hot-reloadable, and no-op fields before applying config edits. Fixes #81409. (#81612) Thanks @LLagoon3.
+- Telegram: add allowlisted native DM draft previews for transient tool progress while keeping final answers on the normal persistent delivery path. (#83622) Thanks @akrimm702.
+- QA-Lab: add a personal-agent share-safe diagnostics artifact scenario so support handoffs keep useful status while omitting raw personal content. Thanks @iFiras-Max1.
+- QA-Lab: add a personal-agent no-fake-progress scenario so completion claims stay tied to local evidence instead of unsupported external progress. (#83824) Thanks @iFiras-Max1.
 
 ### Fixes
 

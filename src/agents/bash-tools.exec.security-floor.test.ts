@@ -176,6 +176,31 @@ describe("exec security floor", () => {
     expect(buildExecSpec).not.toHaveBeenCalled();
   });
 
+  it("rejects approval-backed normalized modes for sandbox execution", async () => {
+    const buildExecSpec = vi.fn(async () => ({
+      argv: ["/bin/sh", "-lc", "printf leaked"],
+      env: process.env,
+      stdinMode: "pipe-closed" as const,
+    }));
+    const tool = createExecTool({
+      host: "auto",
+      mode: "auto",
+      sandbox: {
+        containerName: "sandbox-auto-mode-test",
+        workspaceDir: tempRoot ?? "/tmp",
+        containerWorkdir: "/workspace",
+        buildExecSpec,
+      },
+    });
+
+    await expect(
+      tool.execute("call-mode-auto-sandbox", {
+        command: "echo blocked",
+      }),
+    ).rejects.toThrow("host=sandbox does not support tools.exec.mode=auto");
+    expect(buildExecSpec).not.toHaveBeenCalled();
+  });
+
   it("intersects normalized gateway auto mode with host approval deny defaults", async () => {
     const openclawDir = path.join(tempRoot ?? os.tmpdir(), ".openclaw");
     fs.mkdirSync(openclawDir, { recursive: true });
@@ -201,6 +226,32 @@ describe("exec security floor", () => {
       }),
     ).rejects.toThrow(/security=deny|exec denied/i);
     expect(autoReviewer).not.toHaveBeenCalled();
+  });
+
+  it("uses agent-scoped host policy when clamping normalized modes", async () => {
+    const openclawDir = path.join(tempRoot ?? os.tmpdir(), ".openclaw");
+    fs.mkdirSync(openclawDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(openclawDir, "exec-approvals.json"),
+      `${JSON.stringify({
+        version: 1,
+        defaults: { security: "deny", ask: "off" },
+        agents: { main: { security: "full", ask: "off" } },
+      })}\n`,
+    );
+    const tool = createExecTool({
+      host: "gateway",
+      mode: "full",
+      agentId: "main",
+    });
+
+    const result = await tool.execute("call-agent-host-policy", {
+      command: "echo agent-ok",
+    });
+
+    expect(result.content[0]?.type).toBe("text");
+    const text = (result.content[0] as { text?: string }).text ?? "";
+    expect(text.trim()).toContain("agent-ok");
   });
 
   it("preserves host ask floors for elevated full gateway exec", async () => {

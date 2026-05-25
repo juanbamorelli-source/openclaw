@@ -208,6 +208,7 @@ export type ExecApprovalRequestPayload = {
   commandAnalysis?: CommandExplanationSummary | null;
   commandSpans?: ExecApprovalCommandSpan[];
   allowedDecisions?: readonly ExecApprovalDecision[];
+  requiresExplicitApproval?: boolean;
   agentId?: string | null;
   resolvedPath?: string | null;
   sessionKey?: string | null;
@@ -1309,6 +1310,10 @@ export function maxAsk(a: ExecAsk, b: ExecAsk): ExecAsk {
 }
 
 export type ExecApprovalDecision = "allow-once" | "allow-always" | "deny";
+export const ONE_TIME_EXEC_APPROVAL_DECISIONS = [
+  "allow-once",
+  "deny",
+] as const satisfies readonly ExecApprovalDecision[];
 export const DEFAULT_EXEC_APPROVAL_DECISIONS = [
   "allow-once",
   "allow-always",
@@ -1320,7 +1325,7 @@ export function resolveExecApprovalAllowedDecisions(params?: {
 }): readonly ExecApprovalDecision[] {
   const ask = normalizeExecAsk(params?.ask);
   if (ask === "always") {
-    return ["allow-once", "deny"];
+    return ONE_TIME_EXEC_APPROVAL_DECISIONS;
   }
   return DEFAULT_EXEC_APPROVAL_DECISIONS;
 }
@@ -1329,13 +1334,18 @@ export function resolveExecApprovalRequestAllowedDecisions(params?: {
   ask?: string | null;
   allowedDecisions?: readonly ExecApprovalDecision[] | readonly string[] | null;
 }): readonly ExecApprovalDecision[] {
+  const policyAllowed = resolveExecApprovalAllowedDecisions({ ask: params?.ask });
   const explicit = Array.isArray(params?.allowedDecisions)
     ? params.allowedDecisions.filter(
         (decision): decision is ExecApprovalDecision =>
-          decision === "allow-once" || decision === "allow-always" || decision === "deny",
+          (decision === "allow-once" || decision === "allow-always" || decision === "deny") &&
+          policyAllowed.includes(decision),
       )
     : [];
-  return explicit.length > 0 ? explicit : resolveExecApprovalAllowedDecisions({ ask: params?.ask });
+  if (explicit.length === 0) {
+    return policyAllowed;
+  }
+  return explicit.includes("deny") ? explicit : [...explicit, "deny"];
 }
 
 export function isExecApprovalDecisionAllowed(params: {

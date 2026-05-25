@@ -107,6 +107,7 @@ export async function createModelSelectionState(params: {
   /** True when heartbeat.model was explicitly resolved for this run.
    *  In that case, skip session-stored overrides so the heartbeat selection wins. */
   hasResolvedHeartbeatModelOverride?: boolean;
+  hasOneTurnModelOverride?: boolean;
   isHeartbeat?: boolean;
 }): Promise<ModelSelectionState> {
   const timingEnabled = shouldLogModelSelectionTiming();
@@ -275,6 +276,7 @@ export async function createModelSelectionState(params: {
   const skipStoredOverride =
     params.skipStoredModelOverride === true ||
     params.hasResolvedHeartbeatModelOverride === true ||
+    params.hasOneTurnModelOverride === true ||
     (staleHeartbeatAutoFallbackOverride && storedOverride?.source === "session");
 
   if (storedOverride?.model && !skipStoredOverride) {
@@ -305,6 +307,7 @@ export async function createModelSelectionState(params: {
 
   if (
     !params.skipStoredModelOverride &&
+    params.hasOneTurnModelOverride !== true &&
     sessionEntry &&
     sessionStore &&
     sessionKey &&

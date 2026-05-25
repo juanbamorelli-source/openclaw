@@ -9,6 +9,11 @@ import {
   type ExecTarget,
   maxAsk,
   minSecurity,
+  normalizeExecAsk,
+  normalizeExecMode,
+  normalizeExecSecurity,
+  normalizeExecTarget,
+  resolveExecApprovalsFromFile,
   resolveExecModeFromPolicy,
   resolveExecModePolicy,
   resolveExecPolicyForMode,
@@ -61,17 +66,19 @@ function applySessionExecPolicyLayer(
   base: LayeredExecPolicy,
   sessionEntry?: SessionEntry,
 ): LayeredExecPolicy {
-  if (sessionEntry?.execMode) {
-    const mode = sessionEntry.execMode as ExecMode;
+  const mode = normalizeExecMode(sessionEntry?.execMode);
+  if (mode) {
     return {
       mode,
       ...resolveExecPolicyForMode(mode),
     };
   }
-  if (sessionEntry?.execSecurity !== undefined || sessionEntry?.execAsk !== undefined) {
+  const security = normalizeExecSecurity(sessionEntry?.execSecurity);
+  const ask = normalizeExecAsk(sessionEntry?.execAsk);
+  if (security !== null || ask !== null) {
     return {
-      security: (sessionEntry.execSecurity as ExecSecurity | undefined) ?? base.security,
-      ask: (sessionEntry.execAsk as ExecAsk | undefined) ?? base.ask,
+      security: security ?? base.security,
+      ask: ask ?? base.ask,
     };
   }
   return base;
@@ -85,6 +92,7 @@ function resolveExecConfigState(params: {
 }): {
   cfg: OpenClawConfig;
   host: ExecTarget;
+  agentId: string | undefined;
   agentExec?: ResolvedExecConfig;
   globalExec?: ResolvedExecConfig;
 } {
@@ -100,13 +108,14 @@ function resolveExecConfigState(params: {
     ? resolveAgentConfig(cfg, resolvedAgentId)?.tools?.exec
     : undefined;
   const host =
-    (params.sessionEntry?.execHost as ExecTarget | undefined) ??
+    normalizeExecTarget(params.sessionEntry?.execHost) ??
     (agentExec?.host as ExecTarget | undefined) ??
     (globalExec?.host as ExecTarget | undefined) ??
     "auto";
   return {
     cfg,
     host,
+    agentId: resolvedAgentId,
     agentExec,
     globalExec,
   };
@@ -163,7 +172,13 @@ export function resolveExecDefaults(params: {
   node?: string;
   canRequestNode: boolean;
 } {
-  const { cfg, host, agentExec, globalExec } = resolveExecConfigState(params);
+  const {
+    cfg,
+    host,
+    agentId: resolvedAgentId,
+    agentExec,
+    globalExec,
+  } = resolveExecConfigState(params);
   const sandboxAvailable = resolveExecSandboxAvailability({
     cfg,
     sessionKey: params.sessionKey,
@@ -174,9 +189,18 @@ export function resolveExecDefaults(params: {
     elevatedRequested: params.elevatedRequested === true,
     sandboxAvailable,
   });
-  const approvalDefaults =
-    resolved.effectiveHost === "sandbox" ? undefined : loadExecApprovals().defaults;
   const defaultSecurity = resolved.effectiveHost === "sandbox" ? "deny" : "full";
+  const approvalDefaults =
+    resolved.effectiveHost === "sandbox"
+      ? undefined
+      : resolveExecApprovalsFromFile({
+          file: loadExecApprovals(),
+          agentId: resolvedAgentId,
+          overrides: {
+            security: defaultSecurity,
+            ask: "off",
+          },
+        }).agent;
   const basePolicy: LayeredExecPolicy = {
     security: approvalDefaults?.security ?? defaultSecurity,
     ask: approvalDefaults?.ask ?? "off",

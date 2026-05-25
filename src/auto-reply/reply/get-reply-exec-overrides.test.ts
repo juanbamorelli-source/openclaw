@@ -137,6 +137,24 @@ describe("reply exec overrides", () => {
     });
   });
 
+  it("ignores stale persisted session exec modes that are no longer valid", () => {
+    expect(
+      resolveReplyExecOverrides({
+        directives: parseInlineDirectives("run a command"),
+        sessionEntry: createSessionEntry({
+          execMode: "bogus",
+        }),
+        agentExecDefaults: AGENT_EXEC_DEFAULTS,
+      }),
+    ).toEqual({
+      host: "node",
+      mode: "ask",
+      security: undefined,
+      ask: undefined,
+      node: "worker-alpha",
+    });
+  });
+
   it("does not carry lower-scope mode through a narrower legacy policy override", () => {
     expect(
       resolveReplyExecOverrides({
@@ -183,6 +201,23 @@ describe("reply exec overrides", () => {
       mode: undefined,
       security: "full",
       ask: "on-miss",
+    });
+  });
+
+  it("ignores stale legacy policy fields when a mode is present", () => {
+    expect(
+      resolveReplyExecOverrides({
+        directives: parseInlineDirectives("/exec ask=off"),
+        sessionEntry: createSessionEntry(),
+        globalExecDefaults: {
+          mode: "auto",
+          security: "full",
+        },
+      }),
+    ).toMatchObject({
+      mode: undefined,
+      security: "allowlist",
+      ask: "off",
     });
   });
 

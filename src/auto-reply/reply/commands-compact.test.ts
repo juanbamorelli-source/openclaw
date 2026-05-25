@@ -49,6 +49,7 @@ function buildCompactParams(
       ownerList: [],
     },
     sessionKey: "agent:main:main",
+    directives: {},
     sessionStore: {},
     resolveDefaultThinkingLevel: async () => "medium",
   } as unknown as HandleCommandsParams;
@@ -188,6 +189,73 @@ describe("handleCompactCommand", () => {
     expect(call.senderUsername).toBe("alice_u");
     expect(call.senderE164).toBe("+15551234567");
     expect(call.agentDir).toBe("/tmp/openclaw-agent-compact");
+  });
+
+  it("propagates session exec policy into manual compaction", async () => {
+    vi.mocked(compactEmbeddedPiSession).mockResolvedValueOnce({
+      ok: true,
+      compacted: false,
+    });
+
+    await handleCompactCommand(
+      {
+        ...buildCompactParams("/compact", {
+          tools: { exec: { mode: "auto" } },
+          commands: { text: true },
+          channels: { whatsapp: { allowFrom: ["*"] } },
+        } as OpenClawConfig),
+        sessionEntry: {
+          sessionId: "session-1",
+          updatedAt: Date.now(),
+          execMode: "deny",
+        },
+      } as HandleCommandsParams,
+      true,
+    );
+
+    expect(requireCompactEmbeddedPiSessionCall().execOverrides).toMatchObject({
+      mode: "deny",
+      security: undefined,
+      ask: undefined,
+    });
+  });
+
+  it("uses normalized agent ids when resolving manual compaction exec defaults", async () => {
+    vi.mocked(compactEmbeddedPiSession).mockResolvedValueOnce({
+      ok: true,
+      compacted: false,
+    });
+    resolveSessionAgentIdMock.mockReturnValue("codex-agent");
+
+    await handleCompactCommand(
+      {
+        ...buildCompactParams("/compact", {
+          tools: { exec: { mode: "full" } },
+          agents: {
+            list: [
+              {
+                id: "CodeX-Agent",
+                tools: { exec: { ask: "always" } },
+              },
+            ],
+          },
+          commands: { text: true },
+          channels: { whatsapp: { allowFrom: ["*"] } },
+        } as OpenClawConfig),
+        sessionKey: "agent:codex-agent:main",
+        sessionEntry: {
+          sessionId: "session-1",
+          updatedAt: Date.now(),
+        },
+      } as HandleCommandsParams,
+      true,
+    );
+
+    expect(requireCompactEmbeddedPiSessionCall().execOverrides).toMatchObject({
+      mode: undefined,
+      security: "full",
+      ask: "always",
+    });
   });
 
   it("uses the canonical session agent when resolving the compaction session file", async () => {

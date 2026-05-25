@@ -5,6 +5,23 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct ExecApprovalPromptLayoutTests {
+    @Test func `allowed decisions omit allow always when unavailable`() {
+        let decisions = ExecApprovalsPromptPresenter.allowedPromptDecisions(
+            ExecApprovalPromptRequest(
+                command: "node script.js",
+                cwd: nil,
+                host: "gateway",
+                security: "allowlist",
+                ask: "on-miss",
+                agentId: "main",
+                resolvedPath: nil,
+                sessionKey: "session-1",
+                allowedDecisions: [.allowOnce, .deny]))
+
+        #expect(decisions == [.allowOnce, .deny])
+    }
+
+
     @Test func `accessory view reserves nonzero alert layout space`() {
         let accessory = ExecApprovalsPromptPresenter.buildAccessoryView(
             ExecApprovalPromptRequest(

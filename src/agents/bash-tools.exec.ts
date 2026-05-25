@@ -12,6 +12,7 @@ import {
   maxAsk,
   minSecurity,
   requireValidExecTarget,
+  resolveExecApprovalsFromFile,
   resolveExecModePolicy,
 } from "../infra/exec-approvals.js";
 import { resolveExecSafeBinRuntimePolicy } from "../infra/exec-safe-bin-runtime-policy.js";
@@ -21,7 +22,11 @@ import {
   resolveShellEnvFallbackTimeoutMs,
 } from "../infra/shell-env.js";
 import { logInfo } from "../logger.js";
-import { parseAgentSessionKey, resolveAgentIdFromSessionKey } from "../routing/session-key.js";
+import {
+  normalizeAgentId,
+  parseAgentSessionKey,
+  resolveAgentIdFromSessionKey,
+} from "../routing/session-key.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -1221,6 +1226,18 @@ function rejectUnsafeControlShellCommand(command: string): void {
   }
 }
 
+function resolveExecReviewerDefaults(params: { defaults?: ExecToolDefaults; agentId?: string }) {
+  if (params.defaults?.reviewer) {
+    return params.defaults.reviewer;
+  }
+  const cfg = params.defaults?.config;
+  const agentId = params.agentId ? normalizeAgentId(params.agentId) : undefined;
+  const agentExec = agentId
+    ? cfg?.agents?.list?.find((entry) => normalizeAgentId(entry.id) === agentId)?.tools?.exec
+    : undefined;
+  return agentExec?.reviewer ?? cfg?.tools?.exec?.reviewer;
+}
+
 export function createExecTool(
   defaults?: ExecToolDefaults,
 ): AgentToolWithMeta<typeof execSchema, ExecToolDetails> {
@@ -1282,7 +1299,7 @@ export function createExecTool(
     createModelExecAutoReviewer({
       cfg: defaults?.config,
       agentId,
-      reviewer: defaults?.reviewer,
+      reviewer: resolveExecReviewerDefaults({ defaults, agentId }),
     });
 
   return {
@@ -1404,7 +1421,6 @@ export function createExecTool(
       });
       const host: ExecHost = target.effectiveHost;
 
-      const approvalDefaults = host === "sandbox" ? undefined : loadExecApprovals().defaults;
       const explicitSecurity = defaults?.security;
       const configuredSecurity = explicitSecurity ?? (host === "sandbox" ? "deny" : "full");
       const modePolicy = resolveExecModePolicy({
@@ -1412,9 +1428,28 @@ export function createExecTool(
         security: configuredSecurity,
         ask: defaults?.ask ?? "off",
       });
+      if (
+        host === "sandbox" &&
+        (defaults?.mode === "allowlist" || defaults?.mode === "ask" || defaults?.mode === "auto")
+      ) {
+        throw new Error(
+          `exec denied: host=sandbox does not support tools.exec.mode=${defaults.mode}`,
+        );
+      }
+      const approvalPolicy =
+        host === "sandbox"
+          ? undefined
+          : resolveExecApprovalsFromFile({
+              file: loadExecApprovals(),
+              agentId,
+              overrides: {
+                security: "full",
+                ask: "off",
+              },
+            }).agent;
       let security = minSecurity(
         modePolicy.security,
-        approvalDefaults?.security ?? modePolicy.security,
+        approvalPolicy?.security ?? modePolicy.security,
       );
       if (
         security === "deny" &&
@@ -1423,8 +1458,7 @@ export function createExecTool(
         throw new Error(`exec denied: host=${host} security=deny`);
       }
       const hostPolicyAllowsFullBypass =
-        (approvalDefaults?.security ?? "full") === "full" &&
-        (approvalDefaults?.ask ?? "off") === "off";
+        (approvalPolicy?.security ?? "full") === "full" && (approvalPolicy?.ask ?? "off") === "off";
       const modePolicyAllowsFullBypass = modePolicy.security === "full" && modePolicy.ask === "off";
       if (
         elevatedRequested &&
@@ -1436,7 +1470,7 @@ export function createExecTool(
       }
       // Keep local exec defaults in sync with exec-approvals.json when tools.exec.* is unset.
       const requestedAsk = normalizeExecAsk(params.ask);
-      const hostAsk = maxAsk(modePolicy.ask, approvalDefaults?.ask ?? modePolicy.ask);
+      const hostAsk = maxAsk(modePolicy.ask, approvalPolicy?.ask ?? modePolicy.ask);
       let ask = maxAsk(hostAsk, requestedAsk ?? hostAsk);
       const bypassApprovals =
         elevatedRequested &&

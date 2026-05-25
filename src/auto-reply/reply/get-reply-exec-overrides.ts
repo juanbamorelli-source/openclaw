@@ -1,6 +1,10 @@
 import type { ExecToolDefaults } from "../../agents/bash-tools.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import {
+  normalizeExecAsk,
+  normalizeExecMode,
+  normalizeExecSecurity,
+  normalizeExecTarget,
   resolveExecPolicyForMode,
   type ExecAsk,
   type ExecMode,
@@ -32,7 +36,7 @@ export function resolveReplyExecOverrides(params: {
     : params.directives;
   const host =
     directives.execHost ??
-    (params.sessionEntry?.execHost as ReplyExecOverrides["host"]) ??
+    normalizeExecTarget(params.sessionEntry?.execHost) ??
     params.agentExecDefaults?.host ??
     params.globalExecDefaults?.host;
   const globalPolicy = materializeExecPolicy(params.globalExecDefaults);
@@ -41,9 +45,9 @@ export function resolveReplyExecOverrides(params: {
     materializeExecPolicy(params.agentExecDefaults),
   );
   const sessionPolicy = applyExecPolicyLayer(agentPolicy, {
-    mode: params.sessionEntry?.execMode as ExecMode | undefined,
-    security: params.sessionEntry?.execSecurity as ExecSecurity | undefined,
-    ask: params.sessionEntry?.execAsk as ExecAsk | undefined,
+    mode: normalizeExecMode(params.sessionEntry?.execMode) ?? undefined,
+    security: normalizeExecSecurity(params.sessionEntry?.execSecurity) ?? undefined,
+    ask: normalizeExecAsk(params.sessionEntry?.execAsk) ?? undefined,
   });
   const policy = applyExecPolicyLayer(sessionPolicy, {
     mode: directives.execMode,
@@ -73,8 +77,8 @@ function materializeExecPolicy(exec?: ReplyExecOverrides): {
     const modePolicy = resolveExecPolicyForMode(exec.mode);
     return {
       mode: exec.mode,
-      security: exec.security ?? modePolicy.security,
-      ask: exec.ask ?? modePolicy.ask,
+      security: modePolicy.security,
+      ask: modePolicy.ask,
     };
   }
   return {

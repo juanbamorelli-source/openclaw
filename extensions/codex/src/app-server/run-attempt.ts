@@ -53,8 +53,14 @@ import {
   type NativeHookRelayRegistrationHandle,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { markAuthProfileBlockedUntil, resolveAgentDir } from "openclaw/plugin-sdk/agent-runtime";
-import { emitTrustedDiagnosticEvent } from "openclaw/plugin-sdk/diagnostic-runtime";
+import {
+  emitTrustedDiagnosticEvent,
+  hasPendingInternalDiagnosticEvent,
+  onInternalDiagnosticEvent,
+  type DiagnosticEventPayload,
+} from "openclaw/plugin-sdk/diagnostic-runtime";
 import { loadExecApprovals } from "openclaw/plugin-sdk/exec-approvals-runtime";
+import { isToolAllowed } from "openclaw/plugin-sdk/sandbox";
 import { pathExists } from "openclaw/plugin-sdk/security-runtime";
 import { defaultCodexAppInventoryCache } from "./app-inventory-cache.js";
 import { handleCodexAppServerApprovalRequest } from "./approval-bridge.js";
@@ -88,6 +94,7 @@ import {
   withMcpElicitationsApprovalPolicy,
   type CodexAppServerRuntimeOptions,
   type CodexPluginConfig,
+  type OpenClawExecPolicyForCodexAppServer,
 } from "./config.js";
 import {
   DEFAULT_CODEX_PROJECTION_RESERVE_TOKENS,
@@ -624,6 +631,7 @@ function resolveCodexAppServerForOpenClawToolPolicy(params: {
   env: NodeJS.ProcessEnv;
   shouldPromote: boolean;
   canUseUntrustedApprovalPolicy: boolean;
+  execPolicy?: OpenClawExecPolicyForCodexAppServer;
 }): CodexAppServerRuntimeOptions {
   if (
     !params.shouldPromote ||
@@ -633,6 +641,7 @@ function resolveCodexAppServerForOpenClawToolPolicy(params: {
     return params.appServer;
   }
   const explicitMode =
+    params.execPolicy?.mode === "full" ||
     params.pluginConfig.appServer?.mode !== undefined ||
     isCodexAppServerPolicyMode(params.env.OPENCLAW_CODEX_APP_SERVER_MODE);
   const explicitApprovalPolicy =
@@ -940,6 +949,7 @@ export async function runCodexAppServerAttempt(
   const attemptStartedAt = Date.now();
   const attemptClientFactory = options.clientFactory ?? defaultCodexAppServerClientFactory;
   const pluginConfig = readCodexPluginConfig(options.pluginConfig);
+  const computerUseConfig = resolveCodexComputerUseConfig({ pluginConfig });
   const { sessionAgentId } = resolveSessionAgentIds({
     sessionKey: params.sessionKey,
     config: params.config,
@@ -955,14 +965,15 @@ export async function runCodexAppServerAttempt(
     sessionKey: sandboxSessionKey,
     workspaceDir: resolvedWorkspace,
   });
+  const execPolicy = resolveOpenClawExecPolicyForCodexAppServer({
+    execOverrides: params.execOverrides,
+    approvals: loadExecApprovals(),
+    config: params.config,
+    agentId: sessionAgentId,
+  });
   const configuredAppServer = resolveCodexAppServerRuntimeOptions({
     pluginConfig,
-    execPolicy: resolveOpenClawExecPolicyForCodexAppServer({
-      execOverrides: params.execOverrides,
-      approvals: loadExecApprovals(),
-      config: params.config,
-      agentId: sessionAgentId,
-    }),
+    execPolicy,
     openClawSandboxActive: sandbox?.enabled === true,
   });
   const effectiveWorkspace = sandbox?.enabled
@@ -976,6 +987,7 @@ export async function runCodexAppServerAttempt(
     pluginConfig,
     env: process.env,
     shouldPromote: hasBeforeToolCallPolicy(),
+    execPolicy,
     canUseUntrustedApprovalPolicy:
       configuredAppServer.start.transport !== "stdio" ||
       isCodexAppServerApprovalPolicyAllowedByRequirements("untrusted"),

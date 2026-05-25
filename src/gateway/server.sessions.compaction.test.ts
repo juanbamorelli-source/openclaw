@@ -245,6 +245,7 @@ test("sessions.compact without maxLines runs embedded manual compaction for chec
       main: sessionStoreEntry("sess-main", {
         thinkingLevel: "medium",
         reasoningLevel: "stream",
+        execMode: "deny",
         contextBudgetStatus: {
           schemaVersion: 1,
           source: "pre-prompt-estimate",
@@ -342,6 +343,7 @@ test("sessions.compact without maxLines runs embedded manual compaction for chec
         thinkLevel?: string;
         trigger?: string;
         workspaceDir?: string;
+        execOverrides?: { mode?: string };
       }
     | undefined;
   if (!compactionCall) {
@@ -367,6 +369,7 @@ test("sessions.compact without maxLines runs embedded manual compaction for chec
   expect(compactionCall.agentHarnessId).toBeUndefined();
   expect(compactionCall.thinkLevel).toBe("medium");
   expect(compactionCall.reasoningLevel).toBe("stream");
+  expect(compactionCall.execOverrides).toMatchObject({ mode: "deny" });
   expect(compactionCall.bashElevated).toEqual({
     enabled: false,
     allowed: false,

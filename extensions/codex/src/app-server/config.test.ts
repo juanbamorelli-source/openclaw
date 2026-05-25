@@ -627,7 +627,8 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
       resolveRuntimeForTest({
         pluginConfig: {
           appServer: {
-            command: "node C:\\Users\\me\\.openclaw\\npm\\node_modules\\@openai\\codex\\bin\\codex.js",
+            command:
+              "node C:\\Users\\me\\.openclaw\\npm\\node_modules\\@openai\\codex\\bin\\codex.js",
           },
         },
       }),
@@ -739,7 +740,7 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
     });
   });
 
-  it("preserves explicit app-server policy fields for auto mode", () => {
+  it("forces guarded app-server policy fields for auto mode", () => {
     const runtime = resolveRuntimeForTest({
       pluginConfig: {
         appServer: {
@@ -756,9 +757,9 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
     });
 
     expectRuntimePolicy(runtime, {
-      approvalPolicy: "never",
-      sandbox: "danger-full-access",
-      approvalsReviewer: "user",
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      approvalsReviewer: "auto_review",
     });
   });
 
@@ -786,12 +787,12 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
     });
 
     expectRuntimePolicy(configRuntime, {
-      approvalPolicy: "never",
+      approvalPolicy: "on-request",
       sandbox: "read-only",
-      approvalsReviewer: "user",
+      approvalsReviewer: "auto_review",
     });
     expectRuntimePolicy(envRuntime, {
-      approvalPolicy: "never",
+      approvalPolicy: "on-request",
       sandbox: "read-only",
       approvalsReviewer: "auto_review",
     });
@@ -1039,7 +1040,7 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
     });
   });
 
-  it("preserves explicit app-server policy fields for normalized OpenClaw auto mode", () => {
+  it("forces guarded policy fields for normalized OpenClaw auto mode", () => {
     const runtime = resolveRuntimeForTest({
       pluginConfig: {
         appServer: {
@@ -1052,9 +1053,9 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
     });
 
     expectRuntimePolicy(runtime, {
-      approvalPolicy: "never",
-      sandbox: "danger-full-access",
-      approvalsReviewer: "user",
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      approvalsReviewer: "auto_review",
     });
   });
 

@@ -5,6 +5,7 @@ import { commandRequiresSecurityAuditSuppressionApproval } from "../infra/exec-a
 import {
   addDurableCommandApproval,
   type ExecAsk,
+  ONE_TIME_EXEC_APPROVAL_DECISIONS,
   resolveExecApprovalAllowedDecisions,
   type ExecSecurity,
   buildEnforcedShellCommand,
@@ -18,6 +19,7 @@ import {
 import { defaultExecAutoReviewer, type ExecAutoReviewer } from "../infra/exec-auto-review.js";
 import type { SafeBinProfile } from "../infra/exec-safe-bin-policy.js";
 import { revalidateApprovedMutableFileOperand } from "../node-host/invoke-system-run-plan.js";
+import { INTERNAL_MESSAGE_CHANNEL, normalizeMessageChannel } from "../utils/message-channel.js";
 import { markBackgrounded, tail } from "./bash-process-registry.js";
 import {
   buildExecApprovalRequesterContext,
@@ -37,7 +39,10 @@ import {
   sendExecApprovalFollowupResult,
   shouldResolveExecApprovalUnavailableInline,
 } from "./bash-tools.exec-host-shared.js";
-import { resolveMutableScriptApprovalBindings } from "./bash-tools.exec-mutable-script-guard.js";
+import {
+  resolveMutableScriptApprovalBindings,
+  type MutableScriptApprovalBinding,
+} from "./bash-tools.exec-mutable-script-guard.js";
 import {
   DEFAULT_NOTIFY_TAIL_CHARS,
   createApprovalSlug,
@@ -259,6 +264,20 @@ function shouldAwaitGatewayApprovalInline(params: {
   return normalizeMessageChannel(params.turnSourceChannel) === INTERNAL_MESSAGE_CHANNEL;
 }
 
+function hasChangedMutableScriptBinding(params: {
+  bindings: MutableScriptApprovalBinding[];
+  cwd: string | undefined;
+}): boolean {
+  return params.bindings.some(
+    (binding) =>
+      !revalidateApprovedMutableFileOperand({
+        snapshot: binding.snapshot,
+        argv: binding.argv,
+        cwd: params.cwd,
+      }),
+  );
+}
+
 function buildGatewayExecApprovalDeniedToolResult(params: {
   approvalId: string;
   deniedReason: string;
@@ -381,6 +400,7 @@ export async function processGatewayAllowlist(
       env: params.env,
       segments: allowlistEval.segments,
     }) && !(hostSecurity === "full" && hostAsk === "off");
+  const requiresExplicitOneTimeApproval = requiresSecurityAuditSuppressionApproval;
   const mutableScriptApprovalBindings = resolveMutableScriptApprovalBindings({
     cwd: params.workdir,
     segments: allowlistEval.segments,
@@ -403,6 +423,10 @@ export async function processGatewayAllowlist(
     requiresMutableScriptApproval && mutableScriptApprovalBindings.ok
       ? mutableScriptApprovalBindings.bindings
       : [];
+  const explicitApprovalDecisions =
+    requiresExplicitOneTimeApproval || requiresMutableScriptApproval
+      ? ONE_TIME_EXEC_APPROVAL_DECISIONS
+      : undefined;
   const requiresAsk =
     requiresExecApproval({
       ask: hostAsk,
@@ -530,6 +554,8 @@ export async function processGatewayAllowlist(
           allowlistEval.segments[0]?.resolution ?? null,
           params.workdir,
         ),
+        allowedDecisions: explicitApprovalDecisions,
+        requiresExplicitApproval: explicitApprovalDecisions !== undefined,
         ...buildExecApprovalTurnSourceContext(params),
       });
     const {
@@ -692,6 +718,22 @@ export async function processGatewayAllowlist(
         };
       }
 
+      if (
+        hasChangedMutableScriptBinding({
+          bindings: mutableScriptBindings,
+          cwd: params.workdir,
+        })
+      ) {
+        return {
+          deniedResult: buildGatewayExecApprovalDeniedToolResult({
+            approvalId,
+            deniedReason: "approval script operand changed before execution",
+            command: params.command,
+            cwd: params.workdir,
+          }),
+        };
+      }
+
       recordMatchedAllowlistUse(resolvedPath ?? undefined);
       return {
         execCommandOverride: enforcedCommand,
@@ -815,7 +857,8 @@ export async function processGatewayAllowlist(
         initiatingSurface,
         sentApproverDms,
         unavailableReason,
-        allowedDecisions: resolveExecApprovalAllowedDecisions({ ask: hostAsk }),
+        allowedDecisions:
+          explicitApprovalDecisions ?? resolveExecApprovalAllowedDecisions({ ask: hostAsk }),
       }),
     };
   }

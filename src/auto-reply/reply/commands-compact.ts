@@ -1,4 +1,8 @@
-import { resolveAgentDir, resolveSessionAgentId } from "../../agents/agent-scope.js";
+import {
+  resolveAgentConfig,
+  resolveAgentDir,
+  resolveSessionAgentId,
+} from "../../agents/agent-scope.js";
 import { resolveContextTokensForModel } from "../../agents/context.js";
 import { resolveAgentHarnessPolicy } from "../../agents/harness/selection.js";
 import {
@@ -16,6 +20,7 @@ import {
   normalizeOptionalString,
 } from "../../shared/string-coerce.js";
 import type { CommandHandler } from "./commands-types.js";
+import { resolveReplyExecOverrides } from "./get-reply-exec-overrides.js";
 import { stripMentions, stripStructuralPrefixes } from "./mentions.js";
 
 const compactRuntimeLoader = createLazyImportLoader(() => import("./commands-compact.runtime.js"));
@@ -81,6 +86,10 @@ function formatCompactionReason(reason?: string): string | undefined {
     return "no real conversation messages yet";
   }
   return text;
+}
+
+function resolveAgentExecDefaults(cfg: OpenClawConfig, agentId: string) {
+  return resolveAgentConfig(cfg, agentId)?.tools?.exec;
 }
 
 function resolveManualCompactContextTokenBudget(params: {
@@ -257,6 +266,12 @@ export const handleCompactCommand: CommandHandler = async (params) => {
     agentHarnessId:
       targetSessionEntry.sessionId === sessionId ? targetSessionEntry.agentHarnessId : undefined,
     thinkLevel: params.resolvedThinkLevel ?? (await params.resolveDefaultThinkingLevel()),
+    execOverrides: resolveReplyExecOverrides({
+      directives: params.directives,
+      sessionEntry: targetSessionEntry,
+      globalExecDefaults: params.cfg.tools?.exec,
+      agentExecDefaults: resolveAgentExecDefaults(params.cfg, sessionAgentId),
+    }),
     bashElevated: {
       enabled: false,
       allowed: false,

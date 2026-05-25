@@ -9,7 +9,6 @@ import {
 import type { ExecApprovalForwarder } from "../../infra/exec-approval-forwarder.js";
 import {
   DEFAULT_EXEC_APPROVAL_TIMEOUT_MS,
-  resolveExecApprovalAllowedDecisions,
   resolveExecApprovalRequestAllowedDecisions,
   type ExecApprovalDecision,
   type ExecApprovalRequest,
@@ -188,6 +187,9 @@ export function createExecApprovalHandlers(
         turnSourceAccountId?: string;
         turnSourceThreadId?: string | number;
         requireDeliveryRoute?: boolean;
+        suppressDelivery?: boolean;
+        allowedDecisions?: string[];
+        requiresExplicitApproval?: boolean;
         timeoutMs?: number;
         twoPhase?: boolean;
       };
@@ -323,7 +325,11 @@ export function createExecApprovalHandlers(
         warningText: warningText ? sanitizeExecApprovalWarningText(warningText) : null,
         commandAnalysis,
         commandSpans,
-        allowedDecisions: resolveExecApprovalAllowedDecisions({ ask: p.ask ?? null }),
+        allowedDecisions: resolveExecApprovalRequestAllowedDecisions({
+          ask: p.ask ?? null,
+          allowedDecisions: p.allowedDecisions,
+        }),
+        requiresExplicitApproval: p.requiresExplicitApproval === true,
         agentId: effectiveAgentId ?? null,
         resolvedPath: p.resolvedPath ?? null,
         sessionKey: effectiveSessionKey ?? null,
@@ -369,6 +375,7 @@ export function createExecApprovalHandlers(
         requestEvent,
         twoPhase,
         requireDeliveryRoute: p.requireDeliveryRoute,
+        suppressDelivery: p.suppressDelivery,
         deliverRequest: () => {
           const deliveryTasks: Array<Promise<boolean>> = [];
           if (opts?.forwarder) {

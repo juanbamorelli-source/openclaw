@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { APPROVALS_SCOPE, WRITE_SCOPE } from "../gateway/operator-scopes.js";
 import {
+  ONE_TIME_EXEC_APPROVAL_DECISIONS,
   requiresExecApproval,
   resolveExecApprovalAllowedDecisions,
 } from "../infra/exec-approvals.js";
@@ -25,7 +26,6 @@ import type { ExecuteNodeHostCommandParams } from "./bash-tools.exec-host-node.t
 import * as execHostShared from "./bash-tools.exec-host-shared.js";
 import type { MutableScriptApprovalBinding } from "./bash-tools.exec-mutable-script-guard.js";
 import {
-  DEFAULT_APPROVAL_REQUEST_TIMEOUT_MS,
   DEFAULT_NOTIFY_TAIL_CHARS,
   createApprovalSlug,
   normalizeNotifyOutput,
@@ -102,6 +102,10 @@ export async function executeNodeHostCommand(
     inlineEvalHit !== null ||
     requiresSecurityAuditSuppressionApproval ||
     requiresMutableScriptApproval;
+  const explicitApprovalDecisions =
+    requiresSecurityAuditSuppressionApproval || requiresMutableScriptApproval
+      ? ONE_TIME_EXEC_APPROVAL_DECISIONS
+      : undefined;
   if (requiresSecurityAuditSuppressionApproval) {
     params.warnings.push(
       "Warning: security audit suppression changes require explicit approval unless exec is running in yolo mode.",
@@ -118,7 +122,7 @@ export async function executeNodeHostCommand(
   }
   const registerNodeApproval = async (
     approvalId: string,
-    options: { requireDeliveryRoute?: boolean } = {},
+    options: { requireDeliveryRoute?: boolean; suppressDelivery?: boolean } = {},
   ) =>
     await registerExecApprovalRequestForHostOrThrow({
       approvalId,
@@ -137,6 +141,11 @@ export async function executeNodeHostCommand(
       ...(options.requireDeliveryRoute !== undefined
         ? { requireDeliveryRoute: options.requireDeliveryRoute }
         : {}),
+      ...(options.suppressDelivery !== undefined
+        ? { suppressDelivery: options.suppressDelivery }
+        : {}),
+      allowedDecisions: explicitApprovalDecisions,
+      requiresExplicitApproval: explicitApprovalDecisions !== undefined,
       ...buildExecApprovalTurnSourceContext(params),
     });
 
@@ -174,10 +183,13 @@ export async function executeNodeHostCommand(
       });
       if (decision.decision === "allow-once") {
         const approvalId = crypto.randomUUID();
-        await registerNodeApproval(approvalId, { requireDeliveryRoute: false });
+        await registerNodeApproval(approvalId, {
+          requireDeliveryRoute: false,
+          suppressDelivery: true,
+        });
         await callGatewayTool(
           "exec.approval.resolve",
-          { timeoutMs: DEFAULT_APPROVAL_REQUEST_TIMEOUT_MS },
+          { timeoutMs: 15_000 },
           { id: approvalId, decision: "allow-once" },
           { scopes: [APPROVALS_SCOPE] },
         );
@@ -398,7 +410,8 @@ export async function executeNodeHostCommand(
           initiatingSurface,
           sentApproverDms,
           unavailableReason,
-          allowedDecisions: resolveExecApprovalAllowedDecisions({ ask: hostAsk }),
+          allowedDecisions:
+            explicitApprovalDecisions ?? resolveExecApprovalAllowedDecisions({ ask: hostAsk }),
           nodeId: target.nodeId,
         });
       }

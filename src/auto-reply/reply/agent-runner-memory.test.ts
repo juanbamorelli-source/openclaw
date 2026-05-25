@@ -78,6 +78,7 @@ type CompactEmbeddedPiSessionParams = {
   sessionFile?: string;
   sessionId?: string;
   trigger?: string;
+  execOverrides?: unknown;
 };
 
 function requireRefreshQueuedFollowupSessionCall(index = 0) {
@@ -681,6 +682,7 @@ describe("runMemoryFlushIfNeeded", () => {
         sessionFile,
         sessionKey: "agent:main:main",
         runtimePolicySessionKey: "agent:main:telegram:default:direct:12345",
+        execOverrides: { mode: "deny" },
       }),
       defaultModel: "anthropic/claude-opus-4-6",
       agentCfgContextTokens: 100,
@@ -697,6 +699,7 @@ describe("runMemoryFlushIfNeeded", () => {
     const compactCall = requireCompactEmbeddedPiSessionCall();
     expect(compactCall.sessionKey).toBe("agent:main:main");
     expect(compactCall.sandboxSessionKey).toBe("agent:main:telegram:default:direct:12345");
+    expect(compactCall.execOverrides).toEqual({ mode: "deny" });
   });
 
   it("updates the active preflight run after transcript rotation", async () => {

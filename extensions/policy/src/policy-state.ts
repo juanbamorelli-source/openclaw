@@ -66,6 +66,7 @@ export type PolicyToolPostureEvidence = {
     | "elevatedEnabled"
     | "execAsk"
     | "execHost"
+    | "execMode"
     | "execSecurity"
     | "fsWorkspaceOnly"
     | "profile";
@@ -904,6 +905,41 @@ function pushToolFsPosture(entries: PolicyToolPostureEvidence[], params: ToolPos
   });
 }
 
+function resolveExecModePolicyForEvidence(mode: string | undefined):
+  | {
+      mode: string;
+      security: string;
+      ask: string;
+    }
+  | undefined {
+  switch (mode) {
+    case "deny":
+      return { mode, security: "deny", ask: "off" };
+    case "allowlist":
+      return { mode, security: "allowlist", ask: "off" };
+    case "ask":
+    case "auto":
+      return { mode, security: "allowlist", ask: "on-miss" };
+    case "full":
+      return { mode, security: "full", ask: "off" };
+    default:
+      return undefined;
+  }
+}
+
+function modeFromExecPolicy(security: string, ask: string): string {
+  if (security === "deny") {
+    return "deny";
+  }
+  if (security === "allowlist" && ask === "off") {
+    return "allowlist";
+  }
+  if (security === "full" && ask === "off") {
+    return "full";
+  }
+  return "ask";
+}
+
 function pushToolExecPosture(
   entries: PolicyToolPostureEvidence[],
   params: ToolPostureParams,
@@ -921,30 +957,69 @@ function pushToolExecPosture(
     inherited: localHost === undefined && inheritedHost !== undefined,
   });
 
+  const localMode = readString(localExec.mode);
+  const inheritedMode = readString(inheritedExec.mode);
   const localSecurity = readString(localExec.security);
   const inheritedSecurity = readString(inheritedExec.security);
+  const localAsk = readString(localExec.ask);
+  const inheritedAsk = readString(inheritedExec.ask);
   // Config conformance intentionally ignores exec-approvals.json runtime/operator state.
   const sandboxMode = readString(params.sandbox.mode) ?? readString(params.inheritedSandbox.mode);
   const sandboxCanApply = sandboxMode === "all";
+  const defaultSecurity =
+    host === "sandbox" || (host === "auto" && sandboxCanApply) ? "deny" : "full";
+  const inheritedModePolicy = resolveExecModePolicyForEvidence(inheritedMode);
+  const inheritedSecurityValue =
+    inheritedModePolicy?.security ?? inheritedSecurity ?? defaultSecurity;
+  const inheritedAskValue = inheritedModePolicy?.ask ?? inheritedAsk ?? "off";
+  const localModePolicy = resolveExecModePolicyForEvidence(localMode);
+  const hasLocalLegacyExecPolicy = localSecurity !== undefined || localAsk !== undefined;
+  const security =
+    localModePolicy?.security ??
+    (hasLocalLegacyExecPolicy ? (localSecurity ?? inheritedSecurityValue) : inheritedSecurityValue);
+  const ask =
+    localModePolicy?.ask ??
+    (hasLocalLegacyExecPolicy ? (localAsk ?? inheritedAskValue) : inheritedAskValue);
+  const mode =
+    localModePolicy?.mode ??
+    (hasLocalLegacyExecPolicy
+      ? modeFromExecPolicy(security, ask)
+      : (inheritedModePolicy?.mode ?? modeFromExecPolicy(security, ask)));
+
+  pushToolPostureValue(entries, params, {
+    suffix: "exec/mode",
+    kind: "execMode",
+    value: mode,
+    explicit: localMode !== undefined || inheritedMode !== undefined,
+    inherited: localMode === undefined && inheritedMode !== undefined,
+  });
   pushToolPostureValue(entries, params, {
     suffix: "exec/security",
     kind: "execSecurity",
-    value:
-      localSecurity ??
-      inheritedSecurity ??
-      (host === "sandbox" || (host === "auto" && sandboxCanApply) ? "deny" : "full"),
-    explicit: localSecurity !== undefined || inheritedSecurity !== undefined,
-    inherited: localSecurity === undefined && inheritedSecurity !== undefined,
+    value: security,
+    explicit:
+      localMode !== undefined ||
+      inheritedMode !== undefined ||
+      localSecurity !== undefined ||
+      inheritedSecurity !== undefined,
+    inherited:
+      localMode === undefined &&
+      localSecurity === undefined &&
+      (inheritedMode !== undefined || inheritedSecurity !== undefined),
   });
-
-  const localAsk = readString(localExec.ask);
-  const inheritedAsk = readString(inheritedExec.ask);
   pushToolPostureValue(entries, params, {
     suffix: "exec/ask",
     kind: "execAsk",
-    value: localAsk ?? inheritedAsk ?? "off",
-    explicit: localAsk !== undefined || inheritedAsk !== undefined,
-    inherited: localAsk === undefined && inheritedAsk !== undefined,
+    value: ask,
+    explicit:
+      localMode !== undefined ||
+      inheritedMode !== undefined ||
+      localAsk !== undefined ||
+      inheritedAsk !== undefined,
+    inherited:
+      localMode === undefined &&
+      localAsk === undefined &&
+      (inheritedMode !== undefined || inheritedAsk !== undefined),
   });
 }
 

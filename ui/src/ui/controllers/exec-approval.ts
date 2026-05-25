@@ -13,6 +13,7 @@ export type ExecApprovalRequestPayload = {
     startIndex: number;
     endIndex: number;
   }[];
+  allowedDecisions?: readonly ("allow-once" | "allow-always" | "deny")[];
 };
 
 export type ExecApprovalRequest = {
@@ -36,6 +37,19 @@ export type ExecApprovalResolved = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function parseAllowedDecisions(
+  value: unknown,
+): ("allow-once" | "allow-always" | "deny")[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const decisions = value.filter(
+    (decision): decision is "allow-once" | "allow-always" | "deny" =>
+      decision === "allow-once" || decision === "allow-always" || decision === "deny",
+  );
+  return decisions.length > 0 ? [...new Set(decisions)] : undefined;
 }
 
 function parseCommandSpans(
@@ -106,6 +120,7 @@ export function parseExecApprovalRequested(payload: unknown): ExecApprovalReques
       resolvedPath: typeof request.resolvedPath === "string" ? request.resolvedPath : null,
       sessionKey: typeof request.sessionKey === "string" ? request.sessionKey : null,
       commandSpans: parseCommandSpans(request.commandSpans, command.length),
+      allowedDecisions: parseAllowedDecisions(request.allowedDecisions),
     },
     createdAtMs,
     expiresAtMs,
@@ -158,6 +173,7 @@ export function parsePluginApprovalRequested(payload: unknown): ExecApprovalRequ
       command: title,
       agentId: typeof request.agentId === "string" ? request.agentId : null,
       sessionKey: typeof request.sessionKey === "string" ? request.sessionKey : null,
+      allowedDecisions: parseAllowedDecisions(request.allowedDecisions),
     },
     pluginTitle: title,
     pluginDescription: description,

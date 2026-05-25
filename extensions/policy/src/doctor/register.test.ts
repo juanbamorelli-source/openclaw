@@ -2626,6 +2626,43 @@ describe("registerPolicyDoctorChecks", () => {
     );
   });
 
+  it("derives exec posture evidence from normalized mode", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy(),
+      tools: {
+        exec: { mode: "auto", host: "gateway" },
+      },
+    } as unknown as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        tools: {
+          exec: {
+            allowSecurity: ["allowlist"],
+            requireAsk: ["on-miss"],
+            allowHosts: ["gateway"],
+          },
+        },
+      }),
+      "utf-8",
+    );
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfg));
+    const evidence = collectPolicyEvidence(cfg as unknown as Record<string, unknown>);
+
+    expect(evidence.toolPosture).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "execMode", value: "auto" }),
+        expect.objectContaining({ kind: "execSecurity", value: "allowlist" }),
+        expect.objectContaining({ kind: "execAsk", value: "on-miss" }),
+      ]),
+    );
+    expect(result.findings).toEqual([]);
+  });
+
   it("accepts configured tool posture that matches policy", async () => {
     const configPath = join(workspaceDir, "openclaw.jsonc");
     const cfg = {

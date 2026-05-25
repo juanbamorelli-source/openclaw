@@ -57,7 +57,7 @@ final class ExecApprovalsGatewayPrompter {
                 return
             }
             guard presentation.canPresent else {
-                let decision = Self.fallbackDecision(
+                let decision = Self.nonPresentableDecision(
                     request: request.request,
                     askFallback: presentation.askFallback,
                     allowlist: presentation.allowlist)
@@ -86,14 +86,17 @@ final class ExecApprovalsGatewayPrompter {
     /// Whether the ask policy requires prompting the user.
     /// Note: this only determines if a prompt is shown, not whether the action is allowed.
     /// The security policy (full/deny/allowlist) decides the actual outcome.
-    private static func shouldAsk(security: ExecSecurity, ask: ExecAsk) -> Bool {
+    private static func shouldAsk(request: ExecApprovalPromptRequest? = nil, security: ExecSecurity, ask: ExecAsk) -> Bool {
+        if request?.requiresExplicitApproval == true {
+            return true
+        }
         switch ask {
         case .always:
-            true
+            return true
         case .onMiss:
-            security == .allowlist
+            return security == .allowlist
         case .off:
-            false
+            return false
         }
     }
 
@@ -119,7 +122,7 @@ final class ExecApprovalsGatewayPrompter {
         let security = approvals.agent.security
         let ask = approvals.agent.ask
 
-        let shouldAsk = Self.shouldAsk(security: security, ask: ask)
+        let shouldAsk = Self.shouldAsk(request: request.request, security: security, ask: ask)
 
         let canPresent = shouldAsk && Self.shouldPresent(
             mode: mode,
@@ -134,6 +137,20 @@ final class ExecApprovalsGatewayPrompter {
             security: security,
             askFallback: approvals.agent.askFallback,
             allowlist: approvals.allowlist)
+    }
+
+    private static func nonPresentableDecision(
+        request: ExecApprovalPromptRequest,
+        askFallback: ExecSecurity,
+        allowlist: [ExecAllowlistEntry]) -> ExecApprovalDecision
+    {
+        if request.requiresExplicitApproval == true {
+            return .deny
+        }
+        return self.fallbackDecision(
+            request: request,
+            askFallback: askFallback,
+            allowlist: allowlist)
     }
 
     private static func fallbackDecision(
@@ -219,6 +236,32 @@ extension ExecApprovalsGatewayPrompter {
 
     static func _testShouldAsk(security: ExecSecurity, ask: ExecAsk) -> Bool {
         self.shouldAsk(security: security, ask: ask)
+    }
+
+    static func _testShouldAsk(request: ExecApprovalPromptRequest, security: ExecSecurity, ask: ExecAsk) -> Bool {
+        self.shouldAsk(request: request, security: security, ask: ask)
+    }
+
+    static func _testNonPresentableDecision(
+        command: String,
+        resolvedPath: String?,
+        askFallback: ExecSecurity,
+        allowlistPatterns: [String],
+        requiresExplicitApproval: Bool = false) -> ExecApprovalDecision
+    {
+        self.nonPresentableDecision(
+            request: ExecApprovalPromptRequest(
+                command: command,
+                cwd: nil,
+                host: nil,
+                security: nil,
+                ask: nil,
+                agentId: nil,
+                resolvedPath: resolvedPath,
+                sessionKey: nil,
+                requiresExplicitApproval: requiresExplicitApproval),
+            askFallback: askFallback,
+            allowlist: allowlistPatterns.map { ExecAllowlistEntry(pattern: $0) })
     }
 
     static func _testFallbackDecision(

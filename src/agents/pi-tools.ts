@@ -7,6 +7,7 @@ import { resolveExecCommandHighlighting } from "../config/exec-command-highlight
 import type { ModelCompatConfig } from "../config/types.models.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { DiagnosticTraceContext } from "../infra/diagnostic-trace-context.js";
+import { resolveEventSessionRoutingPolicy } from "../infra/event-session-routing.js";
 import {
   type ExecAsk,
   type ExecMode,

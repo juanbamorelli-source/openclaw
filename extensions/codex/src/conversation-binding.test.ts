@@ -242,7 +242,7 @@ describe("codex conversation binding", () => {
     expect(data.agentDir).toBe(agentDir);
   });
 
-  it("applies configured exec mode policy when binding a new app-server thread", async () => {
+  it("applies configured auto exec mode policy when binding a new app-server thread", async () => {
     const sessionFile = path.join(tempDir, "session.jsonl");
     const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
     sharedClientMocks.getSharedCodexAppServerClient.mockResolvedValue({
@@ -259,19 +259,53 @@ describe("codex conversation binding", () => {
       config: {
         tools: {
           exec: {
-            mode: "ask",
+            mode: "auto",
           },
         },
       } as never,
       sessionFile,
       workspaceDir: tempDir,
       model: "gpt-5.4-mini",
+      approvalPolicy: "never",
+      sandbox: "danger-full-access",
     });
 
     expect(requests[0]?.method).toBe("thread/start");
     expect(requests[0]?.params.approvalPolicy).toBe("on-request");
-    expect(requests[0]?.params.approvalsReviewer).toBe("user");
+    expect(requests[0]?.params.approvalsReviewer).toBe("auto_review");
     expect(requests[0]?.params.sandbox).toBe("workspace-write");
+  });
+
+  it("rejects binding when configured exec mode needs unrouted user approvals", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
+    sharedClientMocks.getSharedCodexAppServerClient.mockResolvedValue({
+      request: vi.fn(async (method: string, requestParams: Record<string, unknown>) => {
+        requests.push({ method, params: requestParams });
+        return {
+          thread: { id: "thread-new", sessionId: "session-1", cwd: tempDir },
+          model: "gpt-5.4-mini",
+        };
+      }),
+    });
+
+    await expect(
+      startCodexConversationThread({
+        config: {
+          tools: {
+            exec: {
+              mode: "ask",
+            },
+          },
+        } as never,
+        sessionFile,
+        workspaceDir: tempDir,
+        model: "gpt-5.4-mini",
+      }),
+    ).rejects.toThrow(
+      "OpenClaw native Codex conversation binding cannot route interactive approvals yet",
+    );
+    expect(requests).toEqual([]);
   });
 
   it("clears the Codex app-server sidecar when a pending bind is denied", async () => {

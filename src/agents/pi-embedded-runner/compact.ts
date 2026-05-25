@@ -723,6 +723,7 @@ async function compactEmbeddedPiSessionDirectOnce(
     const toolsRaw = createOpenClawCodingTools({
       exec: {
         ...params.execOverrides,
+        config: params.config,
         elevated: params.bashElevated,
       },
       sandbox,

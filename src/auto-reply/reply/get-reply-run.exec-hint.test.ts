@@ -1,12 +1,33 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { SessionEntry } from "../../config/sessions.js";
+import { saveExecApprovals } from "../../infra/exec-approvals.js";
 import type { TemplateContext } from "../templating.js";
 import {
   buildExecOverridePromptHint,
   resolvePromptSessionContextForSystemEvent,
+  resolveReplyFullAccessState,
   resolvePromptSilentReplyConversationType,
 } from "./get-reply-run.js";
 import { buildGetReplyCtx, buildGetReplyGroupCtx } from "./get-reply.test-fixtures.js";
+
+function withTempOpenClawHome(run: () => void): void {
+  const previousOpenClawHome = process.env.OPENCLAW_HOME;
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-reply-full-access-"));
+  process.env.OPENCLAW_HOME = tempHome;
+  try {
+    run();
+  } finally {
+    if (previousOpenClawHome === undefined) {
+      delete process.env.OPENCLAW_HOME;
+    } else {
+      process.env.OPENCLAW_HOME = previousOpenClawHome;
+    }
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
+}
 
 describe("buildExecOverridePromptHint", () => {
   it("returns undefined when exec state is fully inherited and elevated is off", () => {
@@ -58,6 +79,68 @@ describe("buildExecOverridePromptHint", () => {
     expect(result).toContain(
       "Auto-approved /elevated full is unavailable here (runtime). Do not ask the user to switch to /elevated full.",
     );
+  });
+});
+
+describe("resolveReplyFullAccessState", () => {
+  it("blocks full access hints when agent-scoped host approval floors require review", () => {
+    withTempOpenClawHome(() => {
+      saveExecApprovals({
+        version: 1,
+        agents: {
+          "agent-a": {
+            security: "full",
+            ask: "always",
+          },
+        },
+      });
+
+      expect(
+        resolveReplyFullAccessState({
+          cfg: {},
+          agentId: "agent-a",
+          elevatedEnabled: true,
+          elevatedAllowed: true,
+          elevatedLevel: "full",
+        }),
+      ).toEqual({
+        available: false,
+        blockedReason: "host-policy",
+      });
+    });
+  });
+
+  it("allows directive full access only when host approvals also allow bypass", () => {
+    withTempOpenClawHome(() => {
+      saveExecApprovals({
+        version: 1,
+        defaults: {
+          security: "full",
+          ask: "off",
+          askFallback: "full",
+        },
+        agents: {},
+      });
+
+      expect(
+        resolveReplyFullAccessState({
+          cfg: {
+            tools: {
+              exec: {
+                mode: "auto",
+              },
+            },
+          },
+          agentId: "main",
+          execOverrides: {
+            mode: "full",
+          },
+          elevatedEnabled: true,
+          elevatedAllowed: true,
+          elevatedLevel: "full",
+        }),
+      ).toEqual({ available: true });
+    });
   });
 });
 

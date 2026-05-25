@@ -67,6 +67,37 @@ struct ExecApprovalsGatewayPrompterTests {
         #expect(!ExecApprovalsGatewayPrompter._testShouldAsk(security: .full, ask: .onMiss))
     }
 
+    @Test func `explicit approval prompt even when ask is off`() {
+        let request = ExecApprovalPromptRequest(
+            command: "node script.js",
+            cwd: nil,
+            host: "gateway",
+            security: "allowlist",
+            ask: "off",
+            agentId: "main",
+            resolvedPath: nil,
+            sessionKey: "session-1",
+            allowedDecisions: [.allowOnce, .deny],
+            requiresExplicitApproval: true)
+
+        #expect(ExecApprovalsGatewayPrompter._testShouldAsk(request: request, security: .allowlist, ask: .off))
+    }
+
+    @Test func `allowed decisions alone do not prompt when ask is off`() {
+        let request = ExecApprovalPromptRequest(
+            command: "node script.js",
+            cwd: nil,
+            host: "gateway",
+            security: "allowlist",
+            ask: "off",
+            agentId: "main",
+            resolvedPath: nil,
+            sessionKey: "session-1",
+            allowedDecisions: [.allowOnce, .allowAlways, .deny])
+
+        #expect(!ExecApprovalsGatewayPrompter._testShouldAsk(request: request, security: .allowlist, ask: .off))
+    }
+
     @Test func `ask off never prompts`() {
         #expect(!ExecApprovalsGatewayPrompter._testShouldAsk(security: .deny, ask: .off))
         #expect(!ExecApprovalsGatewayPrompter._testShouldAsk(security: .allowlist, ask: .off))
@@ -98,5 +129,15 @@ struct ExecApprovalsGatewayPrompterTests {
             askFallback: .full,
             allowlistPatterns: [])
         #expect(decision == .allowOnce)
+    }
+
+    @Test func `explicit approval denies when prompt cannot be shown`() {
+        let decision = ExecApprovalsGatewayPrompter._testNonPresentableDecision(
+            command: "git status",
+            resolvedPath: "/usr/bin/git",
+            askFallback: .full,
+            allowlistPatterns: [],
+            requiresExplicitApproval: true)
+        #expect(decision == .deny)
     }
 }

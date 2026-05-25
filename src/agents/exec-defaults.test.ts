@@ -164,6 +164,28 @@ describe("resolveExecDefaults", () => {
     });
   });
 
+  it("ignores stale persisted session exec modes that are no longer valid", () => {
+    expect(
+      resolveExecDefaults({
+        cfg: {
+          tools: {
+            exec: {
+              mode: "auto",
+            },
+          },
+        },
+        sessionEntry: {
+          execMode: "bogus",
+        } as SessionEntry,
+        sandboxAvailable: false,
+      }),
+    ).toMatchObject({
+      mode: "auto",
+      security: "allowlist",
+      ask: "on-miss",
+    });
+  });
+
   it("reports host approval floors after normalized exec modes", () => {
     vi.mocked(execApprovals.loadExecApprovals).mockReturnValue({
       version: 1,
@@ -189,6 +211,36 @@ describe("resolveExecDefaults", () => {
       mode: "deny",
       security: "deny",
       ask: "on-miss",
+    });
+  });
+
+  it("reports agent-scoped host approval floors", () => {
+    vi.mocked(execApprovals.loadExecApprovals).mockReturnValue({
+      version: 1,
+      agents: {
+        "agent-a": {
+          security: "full",
+          ask: "always",
+        },
+      },
+    });
+
+    expect(
+      resolveExecDefaults({
+        cfg: {
+          tools: {
+            exec: {
+              mode: "full",
+            },
+          },
+        },
+        agentId: "agent-a",
+        sandboxAvailable: false,
+      }),
+    ).toMatchObject({
+      mode: "ask",
+      security: "full",
+      ask: "always",
     });
   });
 

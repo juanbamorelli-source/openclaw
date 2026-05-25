@@ -546,6 +546,17 @@ describe("resolveCliBackendConfig claude-cli defaults", () => {
     expect(resolved?.config.resumeArgs).not.toContain("--dangerously-skip-permissions");
   });
 
+  it("derives bypassPermissions from normalized full exec mode", () => {
+    const resolved = requireCliBackendConfig("claude-cli", {
+      tools: { exec: { mode: "full" } },
+    });
+
+    expect(resolved?.config.args).toContain("--permission-mode");
+    expect(resolved?.config.args).toContain("bypassPermissions");
+    expect(resolved?.config.resumeArgs).toContain("--permission-mode");
+    expect(resolved?.config.resumeArgs).toContain("bypassPermissions");
+  });
+
   it("keeps Claude permission mode unset when OpenClaw exec policy is not YOLO", () => {
     const resolved = requireCliBackendConfig("claude-cli", {
       tools: { exec: { security: "allowlist", ask: "on-miss" } },

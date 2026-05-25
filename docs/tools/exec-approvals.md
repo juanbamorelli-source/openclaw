@@ -257,14 +257,14 @@ If you want a more conservative setup, tighten either layer back to
   </Step>
 </Steps>
 
-### Local shortcut
+### Local setup
 
 ```bash
 openclaw exec-policy preset yolo
 openclaw exec-policy set --host gateway --mode auto
 ```
 
-That local shortcut updates both:
+These local commands update both:
 
 - Local `tools.exec.host/mode` or `tools.exec.host/security/ask`.
 - Local `~/.openclaw/exec-approvals.json` defaults.

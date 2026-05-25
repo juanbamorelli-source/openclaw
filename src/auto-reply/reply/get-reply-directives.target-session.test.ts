@@ -176,6 +176,7 @@ async function resolveHelloWithModelDefaults(params: {
   agentCfg?: { reasoningDefault?: "off" | "on" | "stream" };
   cfg?: Parameters<typeof resolveReplyDirectives>[0]["cfg"];
   commandAuthorized?: boolean;
+  hasOneTurnModelOverride?: boolean;
   provider?: string;
   model?: string;
   ctx?: Parameters<typeof buildTestCtx>[0];
@@ -227,6 +228,7 @@ async function resolveHelloWithModelDefaults(params: {
     provider: params.provider ?? "openai",
     model: params.model ?? "gpt-4o-mini",
     hasResolvedHeartbeatModelOverride: false,
+    hasOneTurnModelOverride: params.hasOneTurnModelOverride,
     typing: makeTypingController(),
     opts: undefined,
     skillFilter: undefined,

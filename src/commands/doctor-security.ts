@@ -15,6 +15,9 @@ import {
   type ExecMode,
   type ExecSecurity,
 } from "../infra/exec-approvals.js";
+import { isLikelySensitiveModelProviderHeaderName } from "../secrets/model-provider-header-policy.js";
+import { hasConfiguredPlaintextSecretValue } from "../secrets/secret-value.js";
+import { discoverConfigSecretTargets } from "../secrets/target-registry.js";
 import { collectExecFilesystemPolicyDriftHits } from "../security/exec-filesystem-policy.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { note } from "../terminal/note.js";
@@ -132,12 +135,30 @@ function collectExecPolicyConflictWarnings(cfg: OpenClawConfig): string[] {
 
     const configParts: string[] = [];
     const hostParts: string[] = [];
+    const formatRequestedField = (
+      field: "security" | "ask",
+      requestedSource: string,
+      requested: ExecSecurity | ExecAsk,
+    ) => {
+      if (requestedSource === snapshot.mode.requestedSource) {
+        return `${snapshot.mode.requestedSource}="${snapshot.mode.requested}" (derived ${field}="${requested}")`;
+      }
+      return `${requestedSource}="${requested}"`;
+    };
     if (securityConflict) {
-      configParts.push(`${snapshot.security.requestedSource}="${snapshot.security.requested}"`);
+      configParts.push(
+        formatRequestedField(
+          "security",
+          snapshot.security.requestedSource,
+          snapshot.security.requested,
+        ),
+      );
       hostParts.push(`${snapshot.security.hostSource}="${snapshot.security.host}"`);
     }
     if (askConflict) {
-      configParts.push(`${snapshot.ask.requestedSource}="${snapshot.ask.requested}"`);
+      configParts.push(
+        formatRequestedField("ask", snapshot.ask.requestedSource, snapshot.ask.requested),
+      );
       hostParts.push(`${snapshot.ask.hostSource}="${snapshot.ask.host}"`);
     }
 

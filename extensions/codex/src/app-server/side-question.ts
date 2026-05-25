@@ -192,10 +192,12 @@ export async function runCodexAppServerSideQuestion(
       "Codex /btw needs an active Codex thread. Send a normal message first, then try /btw again.",
     );
   }
+  const sessionExecOverrides = resolveSideSessionExecOverrides(params.sessionEntry);
   const nativeExecutionBlock = resolveCodexNativeExecutionBlock({
     config: params.cfg,
     sessionKey: params.sessionKey,
     sessionId: params.sessionId,
+    execOverrides: sessionExecOverrides,
     surface: "/btw side-question mode",
   });
   if (nativeExecutionBlock) {
@@ -211,7 +213,7 @@ export async function runCodexAppServerSideQuestion(
   const execPolicy = resolveOpenClawExecPolicyForCodexAppServer({
     config: params.cfg,
     agentId: sessionAgentId,
-    execOverrides: resolveSideSessionExecOverrides(params.sessionEntry),
+    execOverrides: sessionExecOverrides,
     approvals: loadExecApprovals(),
   });
   const cwd = binding.cwd || params.workspaceDir || process.cwd();

@@ -35,6 +35,12 @@ import {
   measureDiagnosticsTimelineSpanSync,
 } from "../../infra/diagnostics-timeline.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import {
+  normalizeExecAsk,
+  normalizeExecMode,
+  normalizeExecSecurity,
+  normalizeExecTarget,
+} from "../../infra/exec-approvals.js";
 import { patchPluginSessionExtension } from "../../plugins/host-hook-state.js";
 import { isPluginJsonValue } from "../../plugins/host-hooks.js";
 import {
@@ -2301,6 +2307,13 @@ export const sessionsHandlers: GatewayRequestHandlers = {
           agentHarnessId: entry?.sessionId === sessionId ? entry.agentHarnessId : undefined,
           thinkLevel: normalizeThinkLevel(entry?.thinkingLevel),
           reasoningLevel: normalizeReasoningLevel(entry?.reasoningLevel),
+          execOverrides: {
+            host: normalizeExecTarget(entry?.execHost) ?? undefined,
+            mode: normalizeExecMode(entry?.execMode) ?? undefined,
+            security: normalizeExecSecurity(entry?.execSecurity) ?? undefined,
+            ask: normalizeExecAsk(entry?.execAsk) ?? undefined,
+            node: normalizeOptionalString(entry?.execNode),
+          },
           bashElevated: {
             enabled: false,
             allowed: false,

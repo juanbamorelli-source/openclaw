@@ -75,7 +75,10 @@ async function writeTestBinding(options: { authProfileId?: string } = {}): Promi
   return sessionFile;
 }
 
-function startCompaction(sessionFile: string, options: { currentTokenCount?: number } = {}) {
+function startCompaction(
+  sessionFile: string,
+  options: { currentTokenCount?: number; execOverrides?: { host?: "node" } } = {},
+) {
   return maybeCompactCodexAppServerSession({
     sessionId: "session-1",
     sessionKey: "agent:main:session-1",
@@ -198,6 +201,23 @@ describe("maybeCompactCodexAppServerSession", () => {
     const sessionFile = await writeTestBinding();
 
     const result = requireCompactResult(await startNodeExecCompaction(sessionFile));
+
+    expect(result.ok).toBe(false);
+    expect(result.compacted).toBe(false);
+    expect(result.reason).toContain(
+      "Codex-native native compaction is unavailable because OpenClaw exec host=node is active for this session.",
+    );
+    expect(fake.request).not.toHaveBeenCalled();
+  });
+
+  it("blocks native app-server compaction when exec host=node is requested for this run", async () => {
+    const fake = createFakeCodexClient();
+    setCodexAppServerClientFactoryForTest(async () => fake.client);
+    const sessionFile = await writeTestBinding();
+
+    const result = requireCompactResult(
+      await startCompaction(sessionFile, { execOverrides: { host: "node" } }),
+    );
 
     expect(result.ok).toBe(false);
     expect(result.compacted).toBe(false);

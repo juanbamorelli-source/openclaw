@@ -831,6 +831,56 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
   );
 
   it.runIf(process.platform !== "win32")(
+    "requires explicit approval for suppression edits passed as shell positional arguments",
+    async () => {
+      const tmp = createFixtureDir("openclaw-system-run-suppression-positional-wrapper-");
+      setRuntimeConfigSnapshot({
+        tools: {
+          exec: {
+            security: "full",
+            ask: "on-miss",
+          },
+        },
+      });
+      saveExecApprovals({
+        version: 1,
+        defaults: {
+          security: "full",
+          ask: "on-miss",
+          askFallback: "deny",
+        },
+        agents: {},
+      });
+      try {
+        const runCommand = vi.fn(async () => createLocalRunResult("should-not-run"));
+        const invoke = await runSystemInvoke({
+          preferMacAppExecHost: false,
+          command: [
+            "/bin/sh",
+            "-lc",
+            'openclaw config set "$1" []',
+            "sh",
+            "security.audit.suppressions",
+          ],
+          cwd: tmp,
+          runCommand,
+          resolveExecSecurity: resolveProductionExecSecurity,
+          resolveExecAsk: resolveProductionExecAsk,
+        });
+
+        expect(runCommand).not.toHaveBeenCalled();
+        expectInvokeErrorMessage(invoke.sendInvokeResult, {
+          message:
+            "SYSTEM_RUN_DENIED: approval required (security audit suppression changes require explicit approval unless exec is running in yolo mode)",
+          exact: true,
+        });
+      } finally {
+        clearRuntimeConfigSnapshot();
+      }
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
     "requires explicit approval when system.run auto mode cannot parse the shell command",
     async () => {
       const tmp = createFixtureDir("openclaw-system-run-auto-unparsed-");
@@ -1038,6 +1088,74 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
     }
   });
 
+  it("requires mutable script binding for generic approved system.run commands", async () => {
+    const tmp = createFixtureDir("openclaw-system-run-approved-script-binding-");
+    const scriptPath = path.join(tmp, "read-info.js");
+    fs.writeFileSync(scriptPath, 'console.log("approved");\n');
+
+    const runCommand = vi.fn(async () => createLocalRunResult("should-not-run"));
+    const invoke = await runSystemInvoke({
+      preferMacAppExecHost: false,
+      command: [process.execPath, scriptPath],
+      cwd: tmp,
+      runCommand,
+      security: "full",
+      ask: "always",
+      approved: true,
+    });
+
+    expect(runCommand).not.toHaveBeenCalled();
+    expectInvokeErrorMessage(invoke.sendInvokeResult, {
+      message: "SYSTEM_RUN_DENIED: approval missing script operand binding",
+      exact: true,
+    });
+  });
+
+  it("allows explicitly approved inline eval system.run commands without script binding", async () => {
+    const tmp = createFixtureDir("openclaw-system-run-approved-inline-eval-");
+    const runCommand = vi.fn(async () => createLocalRunResult("inline-ok"));
+    const invoke = await runSystemInvoke({
+      preferMacAppExecHost: false,
+      command: [process.execPath, "-e", "console.log(1)"],
+      cwd: tmp,
+      runCommand,
+      security: "full",
+      ask: "always",
+      approved: true,
+    });
+
+    expect(runCommand).toHaveBeenCalledTimes(1);
+    expectInvokeOk(invoke.sendInvokeResult, { payloadContains: "inline-ok" });
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "fails closed for approved compound shell payloads before mutable script binding",
+    async () => {
+      const tmp = createFixtureDir("openclaw-system-run-approved-compound-shell-binding-");
+      const otherDir = path.join(tmp, "other");
+      fs.mkdirSync(otherDir);
+      fs.writeFileSync(path.join(otherDir, "read-info.js"), 'console.log("approved compound");\n');
+
+      const runCommand = vi.fn(async () => createLocalRunResult("should-not-run"));
+      const invoke = await runSystemInvoke({
+        preferMacAppExecHost: false,
+        command: ["/bin/sh", "-lc", "cd other && node read-info.js"],
+        rawCommand: '/bin/sh -lc "cd other && node read-info.js"',
+        cwd: tmp,
+        runCommand,
+        security: "full",
+        ask: "always",
+        approved: true,
+      });
+
+      expect(runCommand).not.toHaveBeenCalled();
+      expectInvokeErrorMessage(invoke.sendInvokeResult, {
+        message: "SYSTEM_RUN_DENIED: approval cannot safely bind this interpreter/runtime command",
+        exact: true,
+      });
+    },
+  );
+
   it("requires mutable script binding for allow-always approved system.run commands", async () => {
     const tmp = createFixtureDir("openclaw-system-run-allow-always-script-binding-");
     const scriptPath = path.join(tmp, "read-info.js");
@@ -1058,6 +1176,46 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
     expectInvokeErrorMessage(invoke.sendInvokeResult, {
       message: "SYSTEM_RUN_DENIED: approval missing script operand binding",
       exact: true,
+    });
+  });
+
+  it("fails closed for allowlisted direct system.run commands with unbindable file options", async () => {
+    const tmp = createFixtureDir("openclaw-system-run-direct-unbindable-script-binding-");
+    const scriptPath = path.join(tmp, "read-info.js");
+    const loaderPath = path.join(tmp, "loader.mjs");
+    fs.writeFileSync(scriptPath, 'console.log("allowlisted");\n');
+    fs.writeFileSync(loaderPath, "export default {};\n");
+
+    await withTempApprovalsHome({
+      approvals: createAllowlistOnMissApprovals({
+        agents: {
+          main: {
+            allowlist: [
+              { pattern: fs.realpathSync(process.execPath) },
+              { pattern: fs.realpathSync(scriptPath) },
+              { pattern: fs.realpathSync(loaderPath) },
+            ],
+          },
+        },
+      }),
+      run: async () => {
+        const runCommand = vi.fn(async () => createLocalRunResult("should-not-run"));
+        const invoke = await runSystemInvoke({
+          preferMacAppExecHost: false,
+          command: [process.execPath, "--loader", loaderPath, scriptPath],
+          cwd: tmp,
+          runCommand,
+          security: "allowlist",
+          ask: "on-miss",
+        });
+
+        expect(runCommand).not.toHaveBeenCalled();
+        expectInvokeErrorMessage(invoke.sendInvokeResult, {
+          message:
+            "SYSTEM_RUN_DENIED: approval cannot safely bind this interpreter/runtime command",
+          exact: true,
+        });
+      },
     });
   });
 

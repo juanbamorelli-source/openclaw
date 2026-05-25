@@ -480,6 +480,32 @@ describe("noteSecurityWarnings gateway exposure", () => {
     expect(message).toContain("stricter side wins");
   });
 
+  it("renders mode-derived ask conflicts without inventing a mode value", async () => {
+    await withExecApprovalsFile(
+      {
+        version: 1,
+        defaults: {
+          security: "allowlist",
+          ask: "always",
+        },
+      },
+      async () => {
+        await noteSecurityWarnings({
+          tools: {
+            exec: {
+              mode: "auto",
+            },
+          },
+        } as OpenClawConfig);
+      },
+    );
+
+    const message = lastMessage();
+    expect(message).toContain('tools.exec.mode="auto" (derived ask="on-miss")');
+    expect(message).not.toContain('tools.exec.mode="on-miss"');
+    expect(message).toContain('defaults.ask="always"');
+  });
+
   it("attributes broader host policy warnings to wildcard agent entries", async () => {
     await expectAgentExecHostPolicyWarning("*");
   });

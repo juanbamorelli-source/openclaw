@@ -385,8 +385,11 @@ For Codex app-server sessions, OpenClaw maps `tools.exec.mode: "auto"` to Codex
 Guardian-reviewed approvals, usually
 `approvalPolicy: "on-request"`, `approvalsReviewer: "auto_review"`, and
 `sandbox: "workspace-write"` when the local requirements allow those values.
-The legacy `plugins.entries.codex.config.appServer.mode: "guardian"` preset
-still works, but `tools.exec.mode: "auto"` is the normalized OpenClaw surface.
+In `tools.exec.mode: "auto"`, OpenClaw does not preserve legacy unsafe Codex
+`approvalPolicy: "never"` or `sandbox: "danger-full-access"` overrides; use
+`tools.exec.mode: "full"` for an intentional no-approval Codex posture. The
+legacy `plugins.entries.codex.config.appServer.mode: "guardian"` preset still
+works, but `tools.exec.mode: "auto"` is the normalized OpenClaw surface.
 
 For every app-server field, auth order, environment isolation, discovery, and
 timeout behavior, see [Codex harness reference](/plugins/codex-harness-reference).

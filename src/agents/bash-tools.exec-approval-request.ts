@@ -1,5 +1,6 @@
 import type {
   ExecApprovalCommandSpan,
+  ExecApprovalDecision,
   ExecAsk,
   ExecSecurity,
   SystemRunApprovalPlan,
@@ -50,6 +51,9 @@ export type RequestExecApprovalDecisionParams = {
   turnSourceAccountId?: string;
   turnSourceThreadId?: string | number;
   requireDeliveryRoute?: boolean;
+  suppressDelivery?: boolean;
+  allowedDecisions?: readonly ExecApprovalDecision[];
+  requiresExplicitApproval?: boolean;
 };
 
 type ExecApprovalRequestToolParams = RequestExecApprovalDecisionParams & {
@@ -81,6 +85,9 @@ function buildExecApprovalRequestToolParams(
     turnSourceAccountId: params.turnSourceAccountId,
     turnSourceThreadId: params.turnSourceThreadId,
     requireDeliveryRoute: params.requireDeliveryRoute,
+    suppressDelivery: params.suppressDelivery,
+    allowedDecisions: params.allowedDecisions,
+    requiresExplicitApproval: params.requiresExplicitApproval,
     timeoutMs: DEFAULT_APPROVAL_TIMEOUT_MS,
     twoPhase: true,
   };
@@ -196,6 +203,9 @@ type HostExecApprovalParams = {
   turnSourceAccountId?: string;
   turnSourceThreadId?: string | number;
   requireDeliveryRoute?: boolean;
+  suppressDelivery?: boolean;
+  allowedDecisions?: readonly ExecApprovalDecision[];
+  requiresExplicitApproval?: boolean;
 };
 
 type ExecApprovalRequesterContext = {
@@ -298,6 +308,9 @@ async function buildHostApprovalDecisionParams(
     }),
     resolvedPath: params.resolvedPath,
     requireDeliveryRoute: params.requireDeliveryRoute,
+    suppressDelivery: params.suppressDelivery,
+    allowedDecisions: params.allowedDecisions,
+    requiresExplicitApproval: params.requiresExplicitApproval,
     ...buildExecApprovalTurnSourceContext(params),
   };
 }
