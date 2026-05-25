@@ -943,6 +943,7 @@ export async function createEmbeddedAttemptSessionLockController(params: {
       return takeoverDetected;
     },
     async dispose(): Promise<void> {
+      await abandonInFlightWriteLocks();
       if (!heldLock) {
         return;
       }

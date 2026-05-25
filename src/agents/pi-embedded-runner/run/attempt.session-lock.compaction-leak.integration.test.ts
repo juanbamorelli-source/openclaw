@@ -26,6 +26,17 @@ async function makeSessionFile(): Promise<{ sessionFile: string; lockPath: strin
   return { sessionFile, lockPath: `${sessionFile}.lock` };
 }
 
+async function waitForStuckLockStart(readUnblock: () => (() => void) | undefined): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
+    if (readUnblock()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("timed out waiting for stuck session write lock to start");
+}
+
 describe("#84193 — real-fs proof: stuck post-run compaction releases JSONL write lock on cleanup", () => {
   it(
     "pre-cleanup: a stuck withSessionWriteLock holds the on-disk .jsonl.lock and a competing acquire times out; " +
@@ -57,12 +68,7 @@ describe("#84193 — real-fs proof: stuck post-run compaction releases JSONL wri
         )
         .catch(() => undefined);
 
-      for (let i = 0; i < 40; i += 1) {
-        if (unblockStuck) {
-          break;
-        }
-        await new Promise((r) => setImmediate(r));
-      }
+      await waitForStuckLockStart(() => unblockStuck);
       expect(typeof unblockStuck).toBe("function");
 
       // Real-fs evidence #1: lock file exists on disk with this process as owner.
