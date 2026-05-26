@@ -6,7 +6,12 @@ import type {
   ExtensionContext,
   FileOperations,
 } from "@earendil-works/pi-coding-agent";
-import { extractSections } from "../../auto-reply/reply/post-compaction-context.js";
+import {
+  DEFAULT_POST_COMPACTION_SECTIONS,
+  LEGACY_POST_COMPACTION_SECTIONS,
+  extractSections,
+  matchesSectionSet,
+} from "../../auto-reply/reply/post-compaction-context.js";
 import { openRootFile } from "../../infra/boundary-file-read.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { isAbortError } from "../../infra/unhandled-rejections.js";
@@ -55,8 +60,6 @@ import {
 } from "./compaction-safeguard-runtime.js";
 
 const log = createSubsystemLogger("compaction-safeguard");
-const DEFAULT_POST_COMPACTION_SECTIONS = ["Session Startup", "Red Lines"];
-const LEGACY_POST_COMPACTION_SECTIONS = ["Every Session", "Safety"];
 
 // Track session managers that have already logged the missing-model warning to avoid log spam.
 const missedModelWarningSessions = new WeakSet<object>();
@@ -855,12 +858,7 @@ async function readWorkspaceContextForSummary(
       }
     })();
     let sections = extractSections(content, effectiveSectionNames);
-    if (
-      sections.length === 0 &&
-      effectiveSectionNames.length === 2 &&
-      effectiveSectionNames.some((name) => name.trim().toLowerCase() === "session startup") &&
-      effectiveSectionNames.some((name) => name.trim().toLowerCase() === "red lines")
-    ) {
+    if (sections.length === 0 && matchesSectionSet(effectiveSectionNames, DEFAULT_POST_COMPACTION_SECTIONS)) {
       sections = extractSections(content, LEGACY_POST_COMPACTION_SECTIONS);
     }
 

@@ -8,12 +8,12 @@ import { openRootFile } from "../../infra/boundary-file-read.js";
 import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 
 const MAX_CONTEXT_CHARS = 1800;
-const DEFAULT_POST_COMPACTION_SECTIONS = ["Session Startup", "Red Lines"];
-const LEGACY_POST_COMPACTION_SECTIONS = ["Every Session", "Safety"];
+export const DEFAULT_POST_COMPACTION_SECTIONS = ["Session Startup", "Red Lines"];
+export const LEGACY_POST_COMPACTION_SECTIONS = ["Every Session", "Safety"];
 
 // Compare configured section names as a case-insensitive set so deployments can
 // pin the documented defaults in any order without changing fallback semantics.
-function matchesSectionSet(sectionNames: string[], expectedSections: string[]): boolean {
+export function matchesSectionSet(sectionNames: string[], expectedSections: string[]): boolean {
   if (sectionNames.length !== expectedSections.length) {
     return false;
   }
