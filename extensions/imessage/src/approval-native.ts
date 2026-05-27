@@ -10,6 +10,7 @@ import {
   createChannelNativeOriginTargetResolver,
   doesApprovalRequestMatchChannelAccount,
   resolveApprovalRequestSessionTarget,
+  shouldSuppressLocalNativeExecApprovalPrompt,
 } from "openclaw/plugin-sdk/approval-native-runtime";
 import {
   buildExecApprovalPendingReplyPayload,
@@ -22,10 +23,14 @@ import type {
   ExecApprovalReplyDecision,
   PluginApprovalRequest,
 } from "openclaw/plugin-sdk/approval-runtime";
-import type { ChannelApprovalCapability } from "openclaw/plugin-sdk/channel-contract";
+import type {
+  ChannelApprovalCapability,
+  ChannelOutboundPayloadHint,
+} from "openclaw/plugin-sdk/channel-contract";
 import { channelRouteTargetsMatchExact } from "openclaw/plugin-sdk/channel-route";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import { normalizeAccountId } from "openclaw/plugin-sdk/routing";
+import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
+import { normalizeAccountId, parseAgentSessionKey } from "openclaw/plugin-sdk/routing";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
@@ -365,6 +370,71 @@ function resolveSessionIMessageOriginTarget(sessionTarget: {
 }): IMessageApprovalTarget | null {
   const to = normalizeIMessageMessagingTarget(sessionTarget.to);
   return to ? { to, accountId: normalizeOptionalString(sessionTarget.accountId) } : null;
+}
+
+function resolveIMessageSessionTargetFromSessionKey(
+  sessionKey?: string | null,
+): IMessageApprovalTarget | null {
+  const parsed = parseAgentSessionKey(sessionKey);
+  const rest = parsed?.rest ?? normalizeOptionalString(sessionKey);
+  if (!rest || !normalizeLowercaseStringOrEmpty(rest).startsWith("imessage:")) {
+    return null;
+  }
+  const route = rest.slice("imessage:".length).trim();
+  const routeLower = normalizeLowercaseStringOrEmpty(route);
+  if (
+    !route ||
+    routeLower.startsWith("group:") ||
+    routeLower.startsWith("channel:") ||
+    routeLower.startsWith("chat:")
+  ) {
+    return null;
+  }
+
+  const directPrefix = "direct:";
+  if (routeLower.startsWith(directPrefix)) {
+    const to = normalizeIMessageMessagingTarget(route.slice(directPrefix.length));
+    return to ? { to } : null;
+  }
+
+  const accountScopedDirect = /^([^:]+):direct:(.+)$/i.exec(route);
+  if (accountScopedDirect) {
+    const to = normalizeIMessageMessagingTarget(accountScopedDirect[2] ?? "");
+    return to ? { to, accountId: normalizeAccountId(accountScopedDirect[1] ?? "") } : null;
+  }
+
+  const to = normalizeIMessageMessagingTarget(route);
+  if (!to || inferIMessageTargetChatType(to) !== "direct") {
+    return null;
+  }
+  return { to };
+}
+
+export function shouldSuppressLocalIMessageExecApprovalPrompt(params: {
+  cfg: OpenClawConfig;
+  accountId?: string | null;
+  payload: ReplyPayload;
+  hint?: ChannelOutboundPayloadHint;
+}): boolean {
+  return shouldSuppressLocalNativeExecApprovalPrompt({
+    ...params,
+    isTransportEnabled: isIMessageApprovalTransportEnabled,
+    isSessionRouteEligible: ({ cfg, accountId, metadata }) => {
+      if (getIMessageApprovalApprovers({ cfg, accountId }).length > 0) {
+        return true;
+      }
+      const sessionTarget = resolveIMessageSessionTargetFromSessionKey(metadata.sessionKey);
+      if (!sessionTarget || inferIMessageTargetChatType(sessionTarget.to) !== "direct") {
+        return false;
+      }
+      const targetAccountId = normalizeOptionalString(sessionTarget.accountId);
+      return (
+        !targetAccountId ||
+        !accountId ||
+        normalizeAccountId(targetAccountId) === normalizeAccountId(accountId)
+      );
+    },
+  });
 }
 
 function shouldHandleIMessageApprovalRequest(params: {

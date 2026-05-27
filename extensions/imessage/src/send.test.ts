@@ -1,4 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  clearIMessageApprovalReactionTargetsForTest,
+  resolveIMessageApprovalReactionTargetWithPersistence,
+} from "./approval-reactions.js";
 import type { IMessageRpcClient } from "./client.js";
 import { sendMessageIMessage } from "./send.js";
 
@@ -19,7 +23,20 @@ function createClient(result: Record<string, unknown>): IMessageRpcClient {
   } as unknown as IMessageRpcClient;
 }
 
+function createRejectingClient(error: Error): IMessageRpcClient {
+  return {
+    request: vi.fn(async () => {
+      throw error;
+    }),
+    stop: vi.fn(async () => {}),
+  } as unknown as IMessageRpcClient;
+}
+
 describe("sendMessageIMessage receipts", () => {
+  afterEach(() => {
+    clearIMessageApprovalReactionTargetsForTest();
+  });
+
   it("attaches a text receipt for native send ids", async () => {
     const client = createClient({ guid: "p:0/imsg-1" });
 
@@ -264,5 +281,158 @@ describe("sendMessageIMessage receipts", () => {
 
     expect(result.messageId).toBe("ok");
     expect(result.receipt.platformMessageIds).toStrictEqual([]);
+  });
+
+  it("resolves numeric chat.db ROWIDs to GUIDs for approval reaction binding", async () => {
+    const client = createClient({ message_id: 12345 });
+    const resolveMessageGuidImpl = vi.fn(async () => "p:0/resolved-guid");
+
+    const result = await sendMessageIMessage("chat_id:42", "hello", {
+      config: IMESSAGE_TEST_CFG,
+      client,
+      dbPath: "/Users/me/Library/Messages/chat.db",
+      resolveMessageGuidImpl,
+    });
+
+    expect(result.messageId).toBe("12345");
+    expect(result.guid).toBe("p:0/resolved-guid");
+    expect(resolveMessageGuidImpl).toHaveBeenCalledWith({
+      dbPath: "/Users/me/Library/Messages/chat.db",
+      messageId: "12345",
+    });
+  });
+
+  it("does not resolve chat.db GUIDs when the bridge already returned a GUID", async () => {
+    const client = createClient({ guid: "p:0/native-guid" });
+    const resolveMessageGuidImpl = vi.fn(async () => "p:0/resolved-guid");
+
+    const result = await sendMessageIMessage("chat_id:42", "hello", {
+      config: IMESSAGE_TEST_CFG,
+      client,
+      dbPath: "/Users/me/Library/Messages/chat.db",
+      resolveMessageGuidImpl,
+    });
+
+    expect(result.messageId).toBe("p:0/native-guid");
+    expect(result.guid).toBe("p:0/native-guid");
+    expect(resolveMessageGuidImpl).not.toHaveBeenCalled();
+  });
+
+  it("leaves reaction binding unset when numeric ROWID cannot be resolved", async () => {
+    const client = createClient({ message_id: 12345 });
+    const resolveMessageGuidImpl = vi.fn(async () => null);
+
+    const result = await sendMessageIMessage("chat_id:42", "hello", {
+      config: IMESSAGE_TEST_CFG,
+      client,
+      dbPath: "/Users/me/Library/Messages/chat.db",
+      resolveMessageGuidImpl,
+    });
+
+    expect(result.messageId).toBe("12345");
+    expect(result.guid).toBeUndefined();
+  });
+
+  it("falls back to one-shot imsg send when rpc text send times out", async () => {
+    const client = createRejectingClient(new Error("imsg rpc timeout (send)"));
+    const createClient = vi.fn(async () => client);
+    const runCliJson = vi.fn(async () => ({ status: "sent" }));
+    const resolveSentMessageGuidImpl = vi.fn(async () => "p:0/fallback-guid");
+
+    const result = await sendMessageIMessage("chat_id:42", "hello", {
+      config: IMESSAGE_TEST_CFG,
+      createClient,
+      runCliJson,
+      service: "sms",
+      dbPath: "/Users/me/Library/Messages/chat.db",
+      resolveSentMessageGuidImpl,
+    });
+
+    expect(result.messageId).toBe("ok");
+    expect(result.guid).toBe("p:0/fallback-guid");
+    expect(client.stop).toHaveBeenCalledOnce();
+    expect(runCliJson.mock.calls).toEqual([
+      [["send", "--text", "hello", "--service", "sms", "--region", "US", "--chat-id", "42"]],
+    ]);
+    expect(resolveSentMessageGuidImpl).toHaveBeenCalledWith({
+      dbPath: "/Users/me/Library/Messages/chat.db",
+      target: expect.objectContaining({ kind: "chat_id", chatId: 42 }),
+      text: "hello",
+      sentAfterMs: expect.any(Number),
+    });
+  });
+
+  it("recovers a GUID for approval prompts when rpc send returns only sent status", async () => {
+    const client = createClient({ status: "sent" });
+    const resolveSentMessageGuidImpl = vi.fn(async () => "p:0/recovered-guid");
+    const approvalText = [
+      "Exec approval required",
+      "ID: approval-123",
+      "",
+      "Reply with: /approve approval-123 allow-once|deny",
+    ].join("\n");
+
+    const result = await sendMessageIMessage("chat_id:42", approvalText, {
+      config: IMESSAGE_TEST_CFG,
+      client,
+      dbPath: "/Users/me/Library/Messages/chat.db",
+      resolveSentMessageGuidImpl,
+    });
+
+    expect(result.messageId).toBe("ok");
+    expect(result.guid).toBe("p:0/recovered-guid");
+    await expect(
+      resolveIMessageApprovalReactionTargetWithPersistence({
+        accountId: "default",
+        conversation: { chatId: 42 },
+        messageId: "p:0/recovered-guid",
+        reactionKey: "👍",
+      }),
+    ).resolves.toEqual({
+      approvalId: "approval-123",
+      decision: "allow-once",
+    });
+    expect(resolveSentMessageGuidImpl).toHaveBeenCalledWith({
+      dbPath: "/Users/me/Library/Messages/chat.db",
+      target: expect.objectContaining({ kind: "chat_id", chatId: 42 }),
+      text: expect.stringContaining("ID: approval-123"),
+      sentAfterMs: expect.any(Number),
+    });
+  });
+
+  it("does not poll for approval prompt GUIDs when chat.db is unavailable", async () => {
+    const client = createClient({ status: "sent" });
+    const approvalText = [
+      "Exec approval required",
+      "ID: approval-123",
+      "",
+      "Reply with: /approve approval-123 allow-once|deny",
+    ].join("\n");
+    const startedAt = performance.now();
+
+    const result = await sendMessageIMessage("chat_id:42", approvalText, {
+      config: IMESSAGE_TEST_CFG,
+      client,
+      dbPath: "/path/to/missing/chat.db",
+    });
+
+    expect(performance.now() - startedAt).toBeLessThan(250);
+    expect(result.messageId).toBe("ok");
+    expect(result.guid).toBeUndefined();
+  });
+
+  it("does not use one-shot imsg fallback for non-timeout rpc send errors", async () => {
+    const client = createRejectingClient(new Error("imsg rpc error (send)"));
+    const runCliJson = vi.fn();
+
+    await expect(
+      sendMessageIMessage("chat_id:42", "hello", {
+        config: IMESSAGE_TEST_CFG,
+        client,
+        runCliJson,
+      }),
+    ).rejects.toThrow("imsg rpc error (send)");
+
+    expect(runCliJson).not.toHaveBeenCalled();
   });
 });
