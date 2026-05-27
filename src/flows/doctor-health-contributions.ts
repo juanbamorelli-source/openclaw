@@ -607,6 +607,23 @@ async function runToolResultCapHealth(ctx: DoctorHealthFlowContext): Promise<voi
   }
 }
 
+async function runRuntimeToolSchemasHealth(ctx: DoctorHealthFlowContext): Promise<void> {
+  const findings = await ctx.runtime.collectRuntimeToolSchemaFindings(ctx.cfg);
+  if (findings.length === 0) {
+    return;
+  }
+
+  const { note } = await import("../terminal/note.js");
+  const lines = findings.flatMap((finding) => [
+    finding.message,
+    ...(finding.path ? [`Path: ${finding.path}`] : []),
+    ...(finding.target ? [`Target: ${finding.target}`] : []),
+    ...(finding.requirement ? [`Requirement: ${finding.requirement}`] : []),
+    ...(finding.fixHint ? [`Fix: ${finding.fixHint}`] : []),
+  ]);
+  note(lines.join("\n"), "Runtime tool schemas");
+}
+
 async function runSystemdLingerHealth(ctx: DoctorHealthFlowContext): Promise<void> {
   if (
     ctx.options.nonInteractive === true ||
