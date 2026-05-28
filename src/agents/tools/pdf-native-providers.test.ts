@@ -15,7 +15,7 @@ async function mustRejectWithError(promise: Promise<unknown>): Promise<Error> {
     if (caught instanceof Error) {
       return caught;
     }
-    throw new Error("expected promise to reject with an Error");
+    throw new Error("expected promise to reject with an Error", { cause: caught });
   }
   throw new Error("expected promise to reject");
 }
