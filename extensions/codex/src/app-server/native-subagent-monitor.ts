@@ -202,7 +202,7 @@ export class CodexNativeSubagentMonitor {
     const state = this.resolveMirrorState(notification);
     if (state?.mirror) {
       try {
-        await state.mirror.handleNotification(notification);
+        state.mirror.handleNotification(notification);
       } catch (error) {
         embeddedAgentLog.warn("Failed to mirror Codex native subagent lifecycle event", {
           method: notification.method,
