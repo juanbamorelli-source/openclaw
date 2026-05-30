@@ -415,6 +415,7 @@ describe.concurrent("scripts/crabbox-wrapper", () => {
     const result = runWrapper(
       "provider: hetzner, aws, local-container, blacksmith-testbox, or cloudflare\n",
       ["run", "--target", "windows", "--", "echo ok"],
+      { env: { CRABBOX_PROVIDER: "aws" } },
     );
 
     expect(result.status).toBe(0);
@@ -449,7 +450,7 @@ describe.concurrent("scripts/crabbox-wrapper", () => {
       "--",
       "echo ok",
     ]);
-    expect(result.stderr).toContain("provider=aws");
+    expect(result.stderr).toContain("provider=azure");
   });
 
   it("prefers Azure for unqualified Windows warmups", () => {
