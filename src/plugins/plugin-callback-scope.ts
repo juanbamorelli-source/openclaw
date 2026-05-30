@@ -7,8 +7,6 @@ export type PluginCallbackScope = {
   pluginSource?: string;
 };
 
-type ToolPrepareArguments = NonNullable<AnyAgentTool["prepareArguments"]>;
-
 const scopedTools = new WeakMap<AnyAgentTool, Map<string, AnyAgentTool>>();
 
 function callbackScopeKey(scope: PluginCallbackScope): string {
@@ -47,10 +45,8 @@ function wrapPluginToolCallbacks(scope: PluginCallbackScope, tool: AnyAgentTool)
     ...(prepareArguments
       ? {
           prepareArguments(args) {
-            return runWithPluginCallbackScope(
-              scope,
-              () =>
-                Reflect.apply(prepareArguments, tool, [args]) as ReturnType<ToolPrepareArguments>,
+            return runWithPluginCallbackScope(scope, () =>
+              Reflect.apply(prepareArguments, tool, [args]),
             );
           },
         }
