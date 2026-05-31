@@ -47,6 +47,7 @@ type StatusServiceSummary = {
   } | null;
 };
 
+/** Normalized status overview inputs shared by regular and `--all` renderers. */
 export type StatusOverviewSurface = {
   cfg: Pick<OpenClawConfig, "update" | "gateway">;
   update: UpdateCheckResult;
@@ -66,6 +67,7 @@ export type StatusOverviewSurface = {
   nodeOnlyGateway?: NodeOnlyGatewayInfo | null;
 };
 
+/** Projects the full status scan result into the shared overview surface shape. */
 export function buildStatusOverviewSurfaceFromScan(params: {
   scan: Pick<
     StatusScanResult,
@@ -107,6 +109,7 @@ export function buildStatusOverviewSurfaceFromScan(params: {
   };
 }
 
+/** Projects the lighter `status --all` overview scan into the same surface shape. */
 export function buildStatusOverviewSurfaceFromOverview(params: {
   overview: Pick<
     StatusScanOverviewResult,
@@ -136,6 +139,10 @@ export function buildStatusOverviewSurfaceFromOverview(params: {
   };
 }
 
+/**
+ * Builds overview rows from the normalized surface, preserving caller-controlled
+ * row insertion points while centralizing gateway/update/tailscale formatting.
+ */
 export function buildStatusOverviewRowsFromSurface(params: {
   surface: StatusOverviewSurface;
   prefixRows?: StatusOverviewRow[];
@@ -189,6 +196,7 @@ export function buildStatusOverviewRowsFromSurface(params: {
   });
 }
 
+/** Builds gateway JSON from the normalized surface used by text rendering. */
 export function buildStatusGatewayJsonPayloadFromSurface(params: {
   surface: Pick<
     StatusOverviewSurface,
