@@ -33,18 +33,28 @@ import {
 } from "./http-utils.js";
 
 type OpenAiEmbeddingsHttpOptions = {
+  /** Resolved Gateway auth policy for the embeddings endpoint. */
   auth: ResolvedGatewayAuth;
+  /** Maximum JSON request body size; defaults to the endpoint limit. */
   maxBodyBytes?: number;
+  /** Trusted proxy CIDRs/hosts used for forwarded-origin checks. */
   trustedProxies?: string[];
+  /** Whether direct remote addresses may be used when proxy headers are absent. */
   allowRealIpFallback?: boolean;
+  /** Optional auth failure budget shared with the Gateway HTTP layer. */
   rateLimiter?: AuthRateLimiter;
 };
 
 type EmbeddingsRequest = {
+  /** OpenAI-compatible model selector, usually openclaw or openclaw/<agentId>. */
   model?: unknown;
+  /** Text input or batch of text inputs to embed. */
   input?: unknown;
+  /** Optional output encoding; base64 returns float32 bytes as base64. */
   encoding_format?: unknown;
+  /** Optional per-request output dimensionality override. */
   dimensions?: unknown;
+  /** OpenAI user field accepted for compatibility but not used by this endpoint. */
   user?: unknown;
 };
 
@@ -226,6 +236,7 @@ function resolveEmbeddingsTarget(params: {
   return { provider: configuredProvider, model };
 }
 
+/** Handles OpenAI-compatible `/v1/embeddings` requests through configured memory providers. */
 export async function handleOpenAiEmbeddingsHttpRequest(
   req: IncomingMessage,
   res: ServerResponse,
