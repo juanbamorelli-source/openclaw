@@ -503,6 +503,8 @@ export class RealtimeCallHandler {
       direction: request.direction,
     });
     const host = this.publicOrigin || DEFAULT_HOST;
+    // The token is a one-shot capability embedded in the path so Twilio/Telnyx
+    // WebSocket upgrades can be authorized before provider start frames arrive.
     const streamUrl = `wss://${host}${this.getStreamPathPattern()}/${token}`;
     return { token, streamUrl };
   }
@@ -867,6 +869,8 @@ export class RealtimeCallHandler {
       emitCallEnd(reason);
       session.close();
     };
+    // Public APIs address bridges by OpenClaw call id; telephony callbacks use
+    // provider ids, so both keys must point at the same live bridge/closer.
     this.activeBridgesByCallId.set(callId, session);
     this.activeBridgesByCallId.set(callSid, session);
     this.activeTelephonyClosersByCallId.set(callId, closeTelephony);
