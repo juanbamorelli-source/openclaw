@@ -11,6 +11,9 @@ type EmbeddedRunPayload = NonNullable<EmbeddedAgentRunResult["payloads"]>[number
  * Merges media emitted by tools into the first deliverable embedded-run payload.
  * Reasoning-only payloads stay untouched, and message-tool transcript mirrors
  * are not reused for external media delivery.
+ *
+ * Payload metadata is preserved on mutated replies because downstream source
+ * reply delivery uses that hidden metadata to suppress or mirror messages.
  */
 export function mergeAttemptToolMediaPayloads(params: {
   payloads?: EmbeddedRunPayload[];
@@ -38,6 +41,8 @@ export function mergeAttemptToolMediaPayloads(params: {
       // attach generated media to its transcript mirror and send it again.
       return payloads;
     }
+    // Keep media order stable: existing payload media wins, then newly generated
+    // tool media is appended after trimming/deduplication.
     const mergedMediaUrls = Array.from(new Set([...(payload.mediaUrls ?? []), ...mediaUrls]));
     payloads[payloadIndex] = copyReplyPayloadMetadata(payload, {
       ...payload,
