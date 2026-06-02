@@ -37,12 +37,19 @@ import type { ToolHandlerContext } from "./webhook/realtime-handler.js";
 import { cleanupTailscaleExposure, setupTailscaleExposure } from "./webhook/tailscale.js";
 
 export type VoiceCallRuntime = {
+  /** Normalized voice-call config used for provider, webhook, and manager setup. */
   config: VoiceCallConfig;
+  /** Provider implementation selected from the normalized config. */
   provider: VoiceCallProvider;
+  /** Call manager owning active calls, persistence, and provider event handling. */
   manager: CallManager;
+  /** HTTP/websocket webhook server bound for provider callbacks. */
   webhookServer: VoiceCallWebhookServer;
+  /** Provider-facing webhook URL after public URL, tunnel, or local fallback resolution. */
   webhookUrl: string;
+  /** Externally reachable origin when a public URL/tunnel/Tailscale route is active. */
   publicUrl: string | null;
+  /** Idempotent cleanup for tunnel/Tailscale exposure and the webhook server. */
   stop: () => Promise<void>;
 };
 
@@ -176,6 +183,8 @@ function createRuntimeResourceLifecycle(params: {
       }
       stopped = true;
       const suppressErrors = opts?.suppressErrors ?? false;
+      // Stop in reverse exposure order so provider-facing routes disappear
+      // before the local webhook server is torn down.
       await runStep(async () => {
         if (tunnelResult) {
           await tunnelResult.stop();
@@ -263,14 +272,25 @@ async function resolveRealtimeProvider(params: {
   });
 }
 
-/** Starts the provider, webhook server, optional realtime bridge, and cleanup lifecycle. */
+/**
+ * Starts the provider, webhook server, optional realtime bridge, and cleanup lifecycle.
+ * The returned runtime is fully initialized: manager state restored, exposure
+ * chosen, provider URLs wired, and realtime/TTS integrations attached when enabled.
+ */
 export async function createVoiceCallRuntime(params: {
+  /** Raw plugin config; normalized and validated before any provider is started. */
   config: VoiceCallConfig;
+  /** Narrow core config bridge used by legacy response/TTS call sites. */
   coreConfig: CoreConfig;
+  /** Full host config used for provider/plugin lookup and realtime resolution. */
   fullConfig?: OpenClawConfig;
+  /** Embedded agent runtime used for classic and realtime voice consults. */
   agentRuntime: CoreAgentDeps;
+  /** Optional plugin state runtime installed before manager restore. */
   stateRuntime?: VoiceCallStateRuntime["state"];
+  /** Optional core TTS runtime used for Twilio streaming telephony speech. */
   ttsRuntime?: TelephonyTtsRuntime;
+  /** Optional logger; console methods are used when omitted. */
   logger?: Logger;
 }): Promise<VoiceCallRuntime> {
   const {
