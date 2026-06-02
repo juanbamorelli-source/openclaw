@@ -1,26 +1,15 @@
 import { z } from "zod";
 import type { CallMode } from "./config.js";
 
-// -----------------------------------------------------------------------------
-// Provider Identifiers
-// -----------------------------------------------------------------------------
-
 const ProviderNameSchema = z.enum(["telnyx", "twilio", "plivo", "mock"]);
+/** Carrier/provider ids implemented by the voice-call plugin. */
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
-
-// -----------------------------------------------------------------------------
-// Core Call Identifiers
-// -----------------------------------------------------------------------------
 
 /** Internal call identifier (UUID) */
 export type CallId = string;
 
 /** Provider-specific call identifier */
 type ProviderCallId = string;
-
-// -----------------------------------------------------------------------------
-// Call Lifecycle States
-// -----------------------------------------------------------------------------
 
 const CallStateSchema = z.enum([
   // Non-terminal states
@@ -41,6 +30,7 @@ const CallStateSchema = z.enum([
   "busy",
   "voicemail",
 ]);
+/** Normalized call lifecycle state used by manager persistence and provider events. */
 export type CallState = z.infer<typeof CallStateSchema>;
 
 export const TerminalStates = new Set<CallState>([
@@ -66,11 +56,8 @@ const EndReasonSchema = z.enum([
   "busy",
   "voicemail",
 ]);
+/** Terminal call reason persisted after a provider or local hangup event. */
 export type EndReason = z.infer<typeof EndReasonSchema>;
-
-// -----------------------------------------------------------------------------
-// Normalized Call Events
-// -----------------------------------------------------------------------------
 
 const BaseEventSchema = z.object({
   id: z.string(),
@@ -128,17 +115,10 @@ const NormalizedEventSchema = z.discriminatedUnion("type", [
     retryable: z.boolean().optional(),
   }),
 ]);
+/** Provider webhook events normalized before manager state transitions run. */
 export type NormalizedEvent = z.infer<typeof NormalizedEventSchema>;
 
-// -----------------------------------------------------------------------------
-// Call Direction
-// -----------------------------------------------------------------------------
-
 const CallDirectionSchema = z.enum(["outbound", "inbound"]);
-
-// -----------------------------------------------------------------------------
-// Call Record
-// -----------------------------------------------------------------------------
 
 const TranscriptEntrySchema = z.object({
   timestamp: z.number(),
@@ -146,6 +126,7 @@ const TranscriptEntrySchema = z.object({
   text: z.string(),
   isFinal: z.boolean().default(true),
 });
+/** Transcript row stored on a call record after speech or bot output events. */
 export type TranscriptEntry = z.infer<typeof TranscriptEntrySchema>;
 
 export const CallRecordSchema = z.object({
@@ -165,12 +146,10 @@ export const CallRecordSchema = z.object({
   processedEventIds: z.array(z.string()).default([]),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
+/** Persisted call state shared by the manager, webhook, and restore flow. */
 export type CallRecord = z.infer<typeof CallRecordSchema>;
 
-// -----------------------------------------------------------------------------
-// Webhook Types
-// -----------------------------------------------------------------------------
-
+/** Result of authenticating a provider webhook before event parsing. */
 export type WebhookVerificationResult = {
   ok: boolean;
   reason?: string;
@@ -185,6 +164,7 @@ export type WebhookParseOptions = {
   verifiedRequestKey?: string;
 };
 
+/** Raw HTTP webhook request material passed to provider adapters. */
 export type WebhookContext = {
   headers: Record<string, string | string[] | undefined>;
   rawBody: string;
@@ -194,6 +174,7 @@ export type WebhookContext = {
   remoteAddress?: string;
 };
 
+/** Provider adapter output after converting one webhook request into normalized events. */
 export type ProviderWebhookParseResult = {
   events: NormalizedEvent[];
   providerResponseBody?: string;
@@ -201,10 +182,7 @@ export type ProviderWebhookParseResult = {
   statusCode?: number;
 };
 
-// -----------------------------------------------------------------------------
-// Provider Method Types
-// -----------------------------------------------------------------------------
-
+/** Request shape for starting an outbound provider call. */
 export type InitiateCallInput = {
   callId: CallId;
   from: string;
@@ -231,12 +209,14 @@ export type InitiateCallResult = {
   status: "initiated" | "queued";
 };
 
+/** Request shape for ending an active provider call. */
 export type HangupCallInput = {
   callId: CallId;
   providerCallId: ProviderCallId;
   reason: EndReason;
 };
 
+/** Request shape for provider APIs that answer inbound calls explicitly. */
 export type AnswerCallInput = {
   callId: CallId;
   providerCallId: ProviderCallId;
@@ -251,6 +231,7 @@ export type AnswerCallInput = {
   streamAuthToken?: string;
 };
 
+/** Provider TTS request for speaking text into an active call. */
 export type PlayTtsInput = {
   callId: CallId;
   providerCallId: ProviderCallId;
@@ -259,12 +240,14 @@ export type PlayTtsInput = {
   locale?: string;
 };
 
+/** Provider DTMF request for an active call. */
 export type SendDtmfInput = {
   callId: CallId;
   providerCallId: ProviderCallId;
   digits: string;
 };
 
+/** Provider STT/listening request for an active call turn. */
 export type StartListeningInput = {
   callId: CallId;
   providerCallId: ProviderCallId;
@@ -273,19 +256,18 @@ export type StartListeningInput = {
   turnToken?: string;
 };
 
+/** Provider request to stop collecting user speech. */
 export type StopListeningInput = {
   callId: CallId;
   providerCallId: ProviderCallId;
 };
 
-// -----------------------------------------------------------------------------
-// Call Status Verification (used on restart to verify persisted calls)
-// -----------------------------------------------------------------------------
-
+/** Provider lookup request used when restoring persisted calls after restart. */
 export type GetCallStatusInput = {
   providerCallId: ProviderCallId;
 };
 
+/** Provider status lookup result used to decide whether restored calls stay active. */
 export type GetCallStatusResult = {
   /** Provider-specific status string (e.g. "completed", "in-progress") */
   status: string;
@@ -295,10 +277,7 @@ export type GetCallStatusResult = {
   isUnknown?: boolean;
 };
 
-// -----------------------------------------------------------------------------
-// Outbound Call Options
-// -----------------------------------------------------------------------------
-
+/** User-facing outbound call options accepted by voice-call tools. */
 export type OutboundCallOptions = {
   /** Message to speak when call connects */
   message?: string;
