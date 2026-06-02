@@ -118,6 +118,7 @@ function resolveRuntimeMs(params: {
   return undefined;
 }
 
+/** Projects an agent lifecycle event into the in-memory Gateway session row fields. */
 export function deriveGatewaySessionLifecycleSnapshot(params: {
   session?: Partial<LifecycleSessionShape> | null;
   event: LifecycleEventLike;
@@ -158,6 +159,7 @@ export function deriveGatewaySessionLifecycleSnapshot(params: {
   };
 }
 
+/** Converts a lifecycle event into the session-store patch shape, dropping invalid timestamps. */
 export function derivePersistedSessionLifecyclePatch(params: {
   entry?: Partial<PersistedLifecycleSessionShape> | null;
   event: LifecycleEventLike;
@@ -188,6 +190,7 @@ export function isStaleLifecycleEventForSession(params: {
   );
 }
 
+/** Persists a lifecycle event for one session key while guarding reset-rotated rows. */
 export async function persistGatewaySessionLifecycleEvent(params: {
   sessionKey: string;
   agentId?: string;
