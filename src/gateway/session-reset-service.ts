@@ -127,6 +127,12 @@ export function archiveSessionTranscriptsForSession(params: {
   return archiveSessionTranscriptsForSessionDetailed(params).map((entry) => entry.archivedPath);
 }
 
+/**
+ * Archives every transcript file known for a retired session and returns stable
+ * source/archive pairs for lifecycle hooks. Callers use the detailed form when
+ * hook payloads need to point at the archived transcript instead of the old
+ * live file path.
+ */
 export function archiveSessionTranscriptsForSessionDetailed(params: {
   sessionId: string | undefined;
   storePath: string;
@@ -148,6 +154,11 @@ export function archiveSessionTranscriptsForSessionDetailed(params: {
   });
 }
 
+/**
+ * Emits `session_end` for a known Gateway session and removes it from shutdown
+ * tracking. Reset/delete/compaction paths call this after transcript archival
+ * so plugins receive the final stable transcript location.
+ */
 export function emitGatewaySessionEndPluginHook(params: {
   cfg: OpenClawConfig;
   sessionKey: string;
@@ -202,6 +213,11 @@ export function emitGatewaySessionEndPluginHook(params: {
   });
 }
 
+/**
+ * Emits `session_start` for a new or resumed Gateway session and registers it
+ * for bounded shutdown finalization. The paired end hook may be emitted by
+ * reset/delete/compaction before shutdown ever runs.
+ */
 export function emitGatewaySessionStartPluginHook(params: {
   cfg: OpenClawConfig;
   sessionKey: string;
@@ -333,6 +349,11 @@ export async function drainActiveSessionsForShutdown(params: {
   }
 }
 
+/**
+ * Unbinds a target session from channel/session binding state and optionally
+ * emits the subagent-ended compatibility hook used by existing lifecycle
+ * consumers.
+ */
 export async function emitSessionUnboundLifecycleEvent(params: {
   targetSessionKey: string;
   reason: "session-reset" | "session-delete";
@@ -366,6 +387,11 @@ export async function emitSessionUnboundLifecycleEvent(params: {
   );
 }
 
+/**
+ * Stops runtime-owned resources that can still write to the old session entry.
+ * Returning an error prevents the store mutation so active embedded runs cannot
+ * be reset out from under an in-flight provider/tool loop.
+ */
 async function ensureSessionRuntimeCleanup(params: {
   cfg: OpenClawConfig;
   key: string;
@@ -420,6 +446,11 @@ async function ensureSessionRuntimeCleanup(params: {
   );
 }
 
+/**
+ * Runs one ACP cleanup operation under the reset/delete timeout budget. Timeout
+ * is reported separately from thrown errors because only a stuck runtime blocks
+ * the parent session mutation.
+ */
 async function runAcpCleanupStep(params: {
   op: () => Promise<void>;
 }): Promise<{ status: "ok" } | { status: "timeout" } | { status: "error"; error: unknown }> {
@@ -438,6 +469,11 @@ async function runAcpCleanupStep(params: {
   return outcome;
 }
 
+/**
+ * Cancels and closes the ACP runtime attached to a session key. Reset keeps
+ * enough metadata to create a fresh pending ACP session after the Gateway
+ * session id changes; delete removes the metadata instead.
+ */
 async function closeAcpRuntimeForSession(params: {
   cfg: OpenClawConfig;
   sessionKey: string;
@@ -529,6 +565,11 @@ async function closeAcpRuntimeForSession(params: {
   return undefined;
 }
 
+/**
+ * Prepares persisted ACP metadata for the new post-reset session. Identity is
+ * downgraded to pending so the next ACP turn must rebind to a fresh runtime
+ * session instead of reusing IDs from the retired session.
+ */
 function buildPendingAcpMeta(base: SessionAcpMeta, now: number): SessionAcpMeta {
   const currentIdentity = base.identity;
   const nextIdentity = currentIdentity
@@ -645,6 +686,12 @@ async function closeChildAcpRuntimesForParent(params: {
   );
 }
 
+/**
+ * Performs all cleanup that must happen before a Gateway session store entry is
+ * replaced or deleted. Runtime cleanup failures can block the mutation; plugin
+ * host and child ACP cleanup failures are logged without preventing the parent
+ * operation.
+ */
 export async function cleanupSessionBeforeMutation(params: {
   cfg: OpenClawConfig;
   key: string;
