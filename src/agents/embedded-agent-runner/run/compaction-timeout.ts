@@ -38,6 +38,7 @@ export function resolveRunTimeoutWithCompactionGraceMs(params: {
   return params.runTimeoutMs + params.compactionTimeoutMs;
 }
 
+/** Inputs for selecting a replay snapshot after compaction timed out or completed normally. */
 export type SnapshotSelectionParams = {
   timedOutDuringCompaction: boolean;
   preCompactionSnapshot: AgentMessage[] | null;
@@ -46,12 +47,14 @@ export type SnapshotSelectionParams = {
   currentSessionId: string;
 };
 
+/** Chosen transcript snapshot plus the session id whose transcript it came from. */
 export type SnapshotSelection = {
   messagesSnapshot: AgentMessage[];
   sessionIdUsed: string;
   source: "pre-compaction" | "current";
 };
 
+/** Returns whether a message role can be the legal tail for a follow-up model call. */
 function canContinueFromMessage(message: AgentMessage | undefined): boolean {
   switch (message?.role) {
     case "user":
