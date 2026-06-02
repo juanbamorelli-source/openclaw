@@ -289,6 +289,7 @@ export type WorkboardLifecycle = {
   session: GatewaySessionRow | null;
   state: WorkboardLifecycleState;
   targetStatus?: WorkboardStatus;
+  sourceUpdatedAt?: number;
 };
 
 export type WorkboardTaskStatus =
@@ -1021,6 +1022,17 @@ function taskUpdatedAtValue(task: WorkboardTaskSummary): number {
   return 0;
 }
 
+function taskLifecycleSourceUpdatedAt(task: WorkboardTaskSummary): number | undefined {
+  const updatedAt = taskUpdatedAtValue(task);
+  return updatedAt > 0 ? updatedAt : undefined;
+}
+
+function sessionUpdatedAtValue(session: GatewaySessionRow): number | undefined {
+  return typeof session.updatedAt === "number" && Number.isFinite(session.updatedAt)
+    ? session.updatedAt
+    : undefined;
+}
+
 function taskSessionKeyMatchesCardSession(
   cardSessionKey: string,
   taskSessionKey: string | undefined,
@@ -1297,12 +1309,14 @@ export function getWorkboardLifecycle(
           session,
           state: "running",
           targetStatus: "running",
+          sourceUpdatedAt: taskLifecycleSourceUpdatedAt(task),
         };
       case "completed":
         return {
           session,
           state: "succeeded",
           targetStatus: "review",
+          sourceUpdatedAt: taskLifecycleSourceUpdatedAt(task),
         };
       case "failed":
       case "cancelled":
@@ -1311,6 +1325,7 @@ export function getWorkboardLifecycle(
           session,
           state: "failed",
           targetStatus: "blocked",
+          sourceUpdatedAt: taskLifecycleSourceUpdatedAt(task),
         };
     }
   }
@@ -1321,16 +1336,36 @@ export function getWorkboardLifecycle(
     return { session: null, state: "missing" };
   }
   if (staleSessionState(session)) {
-    return { session, state: "stale", targetStatus: "running" };
+    return {
+      session,
+      state: "stale",
+      targetStatus: "running",
+      sourceUpdatedAt: sessionUpdatedAtValue(session),
+    };
   }
   if (session.hasActiveRun === true || session.status === "running") {
-    return { session, state: "running", targetStatus: "running" };
+    return {
+      session,
+      state: "running",
+      targetStatus: "running",
+      sourceUpdatedAt: sessionUpdatedAtValue(session),
+    };
   }
   if (session.abortedLastRun || isFailedSessionStatus(session.status)) {
-    return { session, state: "failed", targetStatus: "blocked" };
+    return {
+      session,
+      state: "failed",
+      targetStatus: "blocked",
+      sourceUpdatedAt: sessionUpdatedAtValue(session),
+    };
   }
   if (session.status === "done") {
-    return { session, state: "succeeded", targetStatus: "review" };
+    return {
+      session,
+      state: "succeeded",
+      targetStatus: "review",
+      sourceUpdatedAt: sessionUpdatedAtValue(session),
+    };
   }
   return { session, state: "idle" };
 }
@@ -1346,6 +1381,72 @@ function shouldSyncCardStatus(card: WorkboardCard, targetStatus: WorkboardStatus
     return card.status === "running" || card.status === "todo" || card.status === "ready";
   }
   return false;
+}
+
+const pendingStatusTransitions = new WeakMap<WorkboardHost, Set<string>>();
+
+function pendingStatusTransitionMap(host: WorkboardHost) {
+  let transitions = pendingStatusTransitions.get(host);
+  if (!transitions) {
+    transitions = new Set();
+    pendingStatusTransitions.set(host, transitions);
+  }
+  return transitions;
+}
+
+function recordPendingStatusTransition(
+  host: WorkboardHost,
+  card: WorkboardCard | undefined,
+  status: WorkboardStatus,
+): boolean {
+  if (!card || card.status === status) {
+    return false;
+  }
+  pendingStatusTransitionMap(host).add(card.id);
+  return true;
+}
+
+function clearPendingStatusTransition(host: WorkboardHost, cardId: string, recorded: boolean) {
+  if (!recorded) {
+    return;
+  }
+  const transitions = pendingStatusTransitions.get(host);
+  transitions?.delete(cardId);
+}
+
+function latestStatusTransitionAt(card: WorkboardCard): number | undefined {
+  for (let index = (card.events?.length ?? 0) - 1; index >= 0; index -= 1) {
+    const event = card.events?.[index];
+    if (
+      event?.kind === "moved" &&
+      event.fromStatus !== event.toStatus &&
+      event.toStatus === card.status &&
+      typeof event.at === "number" &&
+      Number.isFinite(event.at)
+    ) {
+      return event.at;
+    }
+  }
+  return undefined;
+}
+
+function shouldSkipLifecycleStatusSync(
+  host: WorkboardHost,
+  card: WorkboardCard,
+  lifecycle: WorkboardLifecycle,
+) {
+  if (!lifecycle.targetStatus) {
+    return false;
+  }
+  if (pendingStatusTransitions.get(host)?.has(card.id)) {
+    return true;
+  }
+  const statusTransitionAt = latestStatusTransitionAt(card);
+  return (
+    statusTransitionAt !== undefined &&
+    lifecycle.sourceUpdatedAt !== undefined &&
+    lifecycle.sourceUpdatedAt < statusTransitionAt
+  );
 }
 
 function executionStatusForLifecycle(
@@ -1387,6 +1488,7 @@ function lifecycleSyncKey(card: WorkboardCard, lifecycle: WorkboardLifecycle): s
     session?.status ?? "",
     session?.hasActiveRun === true ? "active" : "idle",
     session?.updatedAt ?? "",
+    lifecycle.sourceUpdatedAt ?? "",
     card.execution?.status ?? "",
     card.execution?.updatedAt ?? "",
   ].join(":");
@@ -1621,7 +1723,10 @@ export async function syncWorkboardLifecycle(params: {
     );
     const executionStatus = executionStatusForLifecycle(lifecycle);
     const patch: Record<string, unknown> = {};
-    if (shouldSyncCardStatus(card, lifecycle.targetStatus)) {
+    if (
+      !shouldSkipLifecycleStatusSync(params.host, card, lifecycle) &&
+      shouldSyncCardStatus(card, lifecycle.targetStatus)
+    ) {
       patch.status = lifecycle.targetStatus;
     }
     if (shouldSyncExecutionStatus(card, executionStatus)) {
@@ -1716,10 +1821,16 @@ export async function saveWorkboardCardDraft(params: {
   }
   state.loading = true;
   state.error = null;
+  const cardId = state.editingCardId;
+  const pendingStatusRecorded = recordPendingStatusTransition(
+    params.host,
+    state.cards.find((card) => card.id === cardId),
+    state.draftStatus,
+  );
   params.requestUpdate?.();
   try {
     const payload = await params.client.request("workboard.cards.update", {
-      id: state.editingCardId,
+      id: cardId,
       patch: draftPayload(state),
     });
     replaceCard(state, normalizeCardPayload(payload));
@@ -1727,6 +1838,7 @@ export async function saveWorkboardCardDraft(params: {
   } catch (error) {
     state.error = formatError(error);
   } finally {
+    clearPendingStatusTransition(params.host, cardId, pendingStatusRecorded);
     state.loading = false;
     params.requestUpdate?.();
   }
@@ -1781,6 +1893,11 @@ export async function moveWorkboardCard(params: {
   }
   state.busyCardId = params.cardId;
   state.error = null;
+  const pendingStatusRecorded = recordPendingStatusTransition(
+    params.host,
+    state.cards.find((card) => card.id === params.cardId),
+    params.status,
+  );
   params.requestUpdate?.();
   try {
     const payload = await params.client.request("workboard.cards.move", {
@@ -1792,6 +1909,7 @@ export async function moveWorkboardCard(params: {
   } catch (error) {
     state.error = formatError(error);
   } finally {
+    clearPendingStatusTransition(params.host, params.cardId, pendingStatusRecorded);
     state.busyCardId = null;
     state.draggedCardId = null;
     params.requestUpdate?.();
