@@ -25,12 +25,16 @@ type RealtimeAudioQueueItem =
       type: "mark";
     };
 
+/** Sends one serialized provider media/control frame; false means the socket can no longer accept output. */
 export type RealtimeAudioSend = (message: string) => boolean;
 
 /** Serializes provider-specific realtime media control envelopes. */
 export interface RealtimeAudioSerializer {
+  /** Wraps one base64 PCMU frame in the provider's outbound media envelope. */
   media(payloadBase64: string): string;
+  /** Builds the provider command that drops queued carrier-side audio. */
   clear(): string;
+  /** Builds a provider mark/control frame emitted after preceding paced audio. */
   mark(name: string): string;
 }
 
@@ -43,7 +47,9 @@ export class RealtimeAudioPacer {
 
   constructor(
     private readonly params: {
+      /** Maximum queued PCMU bytes before playback is abandoned and backpressure fires. */
       maxQueuedAudioBytes?: number;
+      /** Called once the pacer closes because outbound audio outran the provider socket. */
       onBackpressure?: () => void;
       send: RealtimeAudioSend;
       serializer: RealtimeAudioSerializer;
