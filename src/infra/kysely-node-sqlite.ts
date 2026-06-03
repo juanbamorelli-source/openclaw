@@ -1,4 +1,4 @@
-import type { DatabaseSync, SQLInputValue } from "node:sqlite";
+import type { DatabaseSync, SQLInputValue, StatementSync } from "node:sqlite";
 import type {
   DatabaseConnection,
   DatabaseIntrospector,
@@ -12,11 +12,15 @@ import type {
 } from "kysely";
 import {
   CompiledQuery,
+  DeleteQueryNode,
   IdentifierNode,
+  InsertQueryNode,
   RawNode,
+  SelectQueryNode,
   SqliteAdapter,
   SqliteIntrospector,
   SqliteQueryCompiler,
+  UpdateQueryNode,
   createQueryId,
 } from "kysely";
 
@@ -149,26 +153,7 @@ class NodeSqliteKyselyConnection implements DatabaseConnection {
   }
 
   executeQuery<O>(compiledQuery: CompiledQuery): Promise<QueryResult<O>> {
-    const { sql, parameters } = compiledQuery;
-    const stmt = this.#db.prepare(sql);
-    const sqliteParameters = parameters as SQLInputValue[];
-
-    if (stmt.columns().length > 0) {
-      return Promise.resolve({ rows: stmt.all(...sqliteParameters) as O[] });
-    }
-
-    const { changes, lastInsertRowid } = stmt.run(...sqliteParameters);
-    const baseResult: QueryResult<O> = {
-      numAffectedRows: BigInt(changes),
-      rows: [],
-    };
-    if (isInsertStatement(sql) && changes > 0) {
-      return Promise.resolve({
-        ...baseResult,
-        insertId: BigInt(lastInsertRowid),
-      });
-    }
-    return Promise.resolve(baseResult);
+    return Promise.resolve(executeCompiledQuerySync<O>(this.#db, compiledQuery));
   }
 
   async *streamQuery<O>(
@@ -184,8 +169,47 @@ class NodeSqliteKyselyConnection implements DatabaseConnection {
   }
 }
 
-function isInsertStatement(sql: string): boolean {
-  return sql.trimStart().toLowerCase().startsWith("insert");
+/** Execute a compiled Kysely query synchronously against node:sqlite. */
+export function executeCompiledQuerySync<O>(
+  db: DatabaseSync,
+  compiledQuery: CompiledQuery,
+): QueryResult<O> {
+  const statement = db.prepare(compiledQuery.sql);
+  const parameters = compiledQuery.parameters as SQLInputValue[];
+
+  if (statementReturnsRows(statement, compiledQuery)) {
+    return { rows: statement.all(...parameters) as O[] };
+  }
+
+  const { changes, lastInsertRowid } = statement.run(...parameters);
+  const result: QueryResult<O> = {
+    numAffectedRows: BigInt(changes),
+    rows: [],
+  };
+  if (InsertQueryNode.is(compiledQuery.query) && changes > 0) {
+    return { ...result, insertId: BigInt(lastInsertRowid) };
+  }
+  return result;
+}
+
+// node:sqlite added StatementSync.columns() in v22.16/v23.11; it asks SQLite
+// directly whether a prepared statement yields a result set. Node 23.0–23.10
+// (still >=22.19, so allowed by engines) lack it, so fall back to the compiled
+// Kysely node. That is exact here: callers only execute builder queries through
+// this dialect, and the dialect itself only raw-executes transaction-control
+// statements (begin/commit/rollback/savepoint), none of which return rows.
+function statementReturnsRows(statement: StatementSync, compiledQuery: CompiledQuery): boolean {
+  if (typeof statement.columns === "function") {
+    return statement.columns().length > 0;
+  }
+  const node = compiledQuery.query;
+  if (SelectQueryNode.is(node)) {
+    return true;
+  }
+  if (InsertQueryNode.is(node) || UpdateQueryNode.is(node) || DeleteQueryNode.is(node)) {
+    return node.returning != null;
+  }
+  return false;
 }
 
 function createSavepointCommand(command: string, savepointName: string): RawNode {
