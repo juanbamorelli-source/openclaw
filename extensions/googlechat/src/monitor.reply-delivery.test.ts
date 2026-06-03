@@ -79,6 +79,7 @@ describe("Google Chat reply delivery", () => {
       config,
       statusSink,
       typingMessageName: "spaces/AAA/messages/typing",
+      typingMessageThreadName: "spaces/AAA/threads/root",
     });
 
     expect(mocks.updateGoogleChatMessage).toHaveBeenCalledWith({
@@ -103,6 +104,36 @@ describe("Google Chat reply delivery", () => {
     expect(runtime.error).toHaveBeenCalledWith(
       "Google Chat message send failed: Error: message not found",
     );
+  });
+
+  it("does not update a threaded typing message when replyToMode removed the reply target", async () => {
+    const core = createCore();
+    const runtime = createRuntime();
+    mocks.deleteGoogleChatMessage.mockResolvedValue(undefined);
+    mocks.sendGoogleChatMessage.mockResolvedValue({ messageName: "spaces/AAA/messages/reply" });
+
+    await deliverGoogleChatReply({
+      payload: { text: "off-mode reply" },
+      account,
+      spaceId: "spaces/AAA",
+      runtime,
+      core,
+      config,
+      typingMessageName: "spaces/AAA/messages/typing",
+      typingMessageThreadName: "spaces/AAA/threads/root",
+    });
+
+    expect(mocks.deleteGoogleChatMessage).toHaveBeenCalledWith({
+      account,
+      messageName: "spaces/AAA/messages/typing",
+    });
+    expect(mocks.updateGoogleChatMessage).not.toHaveBeenCalled();
+    expect(mocks.sendGoogleChatMessage).toHaveBeenCalledWith({
+      account,
+      space: "spaces/AAA",
+      text: "off-mode reply",
+      thread: undefined,
+    });
   });
 
   it("does not update a deleted typing message before sending media with a caption", async () => {
