@@ -136,7 +136,7 @@ function isTestYoloConfig(context?: CliBackendNormalizeConfigContext): boolean {
     ? context.config?.agents?.list?.find((agent) => agent.id === context.agentId)?.tools?.exec
     : undefined;
   const exec = agentExec ?? context?.config?.tools?.exec;
-  return (exec?.security ?? "full") === "full" && (exec?.ask ?? "off") === "off";
+  return (exec?.mode ?? "full") === "full";
 }
 
 function normalizeTestPermissionMode(context?: CliBackendNormalizeConfigContext): {

@@ -77,7 +77,7 @@ function expectMalformedAgentAskUsesDefaults(agentAsk: unknown): void {
   const summary = resolveExecPolicyScopeSummary({
     approvals,
     globalExecConfig: {
-      ask: "off",
+      mode: "full",
     },
     configPath: "agents.list.runner.tools.exec",
     scopeLabel: "agent:runner",
@@ -385,8 +385,7 @@ describe("exec approvals policy helpers", () => {
         },
       },
       scopeExecConfig: {
-        security: "full",
-        ask: "off",
+        mode: "full",
       },
       configPath: "tools.exec",
       scopeLabel: "tools.exec",
@@ -541,8 +540,7 @@ describe("exec approvals policy helpers", () => {
         },
       },
       scopeExecConfig: {
-        security: "full",
-        ask: "off",
+        mode: "full",
       },
       configPath: "tools.exec",
       scopeLabel: "tools.exec",
@@ -633,8 +631,7 @@ describe("exec approvals policy helpers", () => {
         },
       },
       scopeExecConfig: {
-        security: "full",
-        ask: "off",
+        mode: "full",
       },
       configPath: "agents.list.runner.tools.exec",
       scopeLabel: "agent:runner",

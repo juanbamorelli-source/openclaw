@@ -107,8 +107,7 @@ describe("noteSecurityWarnings gateway exposure", () => {
                 id: "runner",
                 tools: {
                   exec: {
-                    security: "full",
-                    ask: "off",
+                    mode: "full",
                   },
                 },
               },
@@ -493,8 +492,7 @@ describe("noteSecurityWarnings gateway exposure", () => {
         await noteSecurityWarnings({
           tools: {
             exec: {
-              security: "allowlist",
-              ask: "on-miss",
+              mode: "ask",
             },
           },
         } as OpenClawConfig);
@@ -516,7 +514,7 @@ describe("noteSecurityWarnings gateway exposure", () => {
         await noteSecurityWarnings({
           tools: {
             exec: {
-              ask: "always",
+              mode: "always",
             },
           },
         } as OpenClawConfig);
@@ -581,7 +579,7 @@ describe("noteSecurityWarnings gateway exposure", () => {
         await noteSecurityWarnings({
           tools: {
             exec: {
-              ask: "off",
+              mode: "allowlist",
             },
           },
           agents: {

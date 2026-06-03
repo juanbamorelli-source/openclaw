@@ -441,8 +441,7 @@ describe("exec-policy CLI", () => {
       tools: {
         exec: {
           host: "auto",
-          security: "allowlist\u001B[31m" as unknown as "allowlist",
-          ask: "on-miss",
+          mode: "ask",
         },
       },
     });
@@ -517,8 +516,7 @@ describe("exec-policy CLI", () => {
       tools: {
         exec: {
           host: "node",
-          security: "allowlist",
-          ask: "on-miss",
+          mode: "ask",
         },
       },
     });

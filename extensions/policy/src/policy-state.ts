@@ -58,6 +58,8 @@ function resolveExecModePosture(mode: PolicyExecMode): {
     case "full-always":
       return { security: "full", ask: "always" };
   }
+  mode satisfies never;
+  throw new Error("Unknown exec mode");
 }
 
 export type PolicyAttestation = {
