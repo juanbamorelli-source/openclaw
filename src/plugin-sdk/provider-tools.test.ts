@@ -32,6 +32,26 @@ describe("buildProviderToolCompatFamilyHooks", () => {
     return tool as never;
   }
 
+  function createToolWithHostileNestedSchema(name = "bad_schema") {
+    const properties = {};
+    Object.defineProperty(properties, "mode", {
+      enumerable: true,
+      get() {
+        throw new Error("schema revoked");
+      },
+    });
+    return {
+      name,
+      description: "",
+      parameters: {
+        type: "object",
+        properties,
+        required: ["mode"],
+        additionalProperties: false,
+      },
+    } as never;
+  }
+
   function normalizeOpenAIParameters(parameters: unknown): unknown {
     const hooks = buildProviderToolCompatFamilyHooks("openai");
     const tools = [{ name: "demo", description: "", parameters }] as never;
@@ -222,6 +242,74 @@ describe("buildProviderToolCompatFamilyHooks", () => {
     expect(typeof normalized[0]?.execute).toBe("function");
   });
 
+  it("isolates hostile nested provider tool schemas during normalize hooks", () => {
+    const healthyTool = {
+      name: "healthy_tool",
+      description: "",
+      parameters: {
+        type: "object",
+        properties: { mode: { type: "string" } },
+        required: ["mode"],
+        additionalProperties: false,
+      },
+    };
+    const cases = [
+      {
+        family: "deepseek" as const,
+        ctx: {
+          provider: "deepseek",
+          modelId: "deepseek-v4-pro",
+          modelApi: "openai-completions",
+          model: {
+            provider: "deepseek",
+            api: "openai-completions",
+            id: "deepseek-v4-pro",
+          } as never,
+        },
+      },
+      {
+        family: "gemini" as const,
+        ctx: {
+          provider: "google",
+          modelId: "gemini-3-pro",
+          modelApi: "google",
+          model: {
+            provider: "google",
+            api: "google",
+            id: "gemini-3-pro",
+          } as never,
+        },
+      },
+      {
+        family: "openai" as const,
+        ctx: {
+          provider: "openai",
+          modelId: "gpt-5.4",
+          modelApi: "openai-responses",
+          model: {
+            provider: "openai",
+            api: "openai-responses",
+            baseUrl: "https://api.openai.com/v1",
+            id: "gpt-5.4",
+          } as never,
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const hooks = buildProviderToolCompatFamilyHooks(testCase.family);
+      const normalized = hooks.normalizeToolSchemas({
+        ...testCase.ctx,
+        tools: [createToolWithHostileNestedSchema(), healthyTool] as never,
+      });
+
+      expect(
+        normalized.map((tool) => tool.name),
+        testCase.family,
+      ).toEqual(["healthy_tool"]);
+    }
+  });
+
   it("reports unreadable provider tool schema metadata during inspect hooks", () => {
     const hooks = buildProviderToolCompatFamilyHooks("gemini");
 
@@ -265,6 +353,93 @@ describe("buildProviderToolCompatFamilyHooks", () => {
         violations: ["healthy_tool.parameters.properties.count.minimum"],
       },
     ]);
+  });
+
+  it("reports hostile nested provider tool schemas during inspect hooks", () => {
+    const hooks = buildProviderToolCompatFamilyHooks("gemini");
+
+    const diagnostics = hooks.inspectToolSchemas({
+      provider: "google",
+      modelId: "gemini-3-pro",
+      modelApi: "google",
+      model: {
+        provider: "google",
+        api: "google",
+        id: "gemini-3-pro",
+      } as never,
+      tools: [
+        createToolWithHostileNestedSchema(),
+        {
+          name: "healthy_tool",
+          description: "",
+          parameters: {
+            type: "object",
+            properties: { count: { type: "integer", minimum: 1 } },
+          },
+        },
+      ] as never,
+    });
+
+    expect(diagnostics).toEqual([
+      {
+        toolName: "bad_schema",
+        toolIndex: 0,
+        violations: ["bad_schema.parameters"],
+      },
+      {
+        toolName: "healthy_tool",
+        toolIndex: 1,
+        violations: ["healthy_tool.parameters.properties.count.minimum"],
+      },
+    ]);
+    expect(
+      findOpenAIStrictSchemaViolations(
+        createToolWithHostileNestedSchema().parameters,
+        "bad_schema.parameters",
+      ),
+    ).toEqual(["bad_schema.parameters"]);
+  });
+
+  it("uses context metadata when OpenAI model identity accessors are hostile", () => {
+    const hooks = buildProviderToolCompatFamilyHooks("openai");
+    const model = Object.defineProperties(
+      {},
+      {
+        provider: {
+          enumerable: true,
+          get() {
+            throw new Error("provider revoked");
+          },
+        },
+        api: {
+          enumerable: true,
+          get() {
+            throw new Error("api revoked");
+          },
+        },
+        baseUrl: {
+          enumerable: true,
+          get() {
+            throw new Error("baseUrl revoked");
+          },
+        },
+      },
+    );
+
+    const normalized = hooks.normalizeToolSchemas({
+      provider: "openai",
+      modelId: "gpt-5.4",
+      modelApi: "openai-responses",
+      model: model as never,
+      tools: [{ name: "ping", description: "", parameters: {} }] as never,
+    });
+
+    expect(normalized[0]?.parameters).toEqual({
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    });
   });
 
   it("preserves string-const unions as a flat enum for the deepseek family", () => {

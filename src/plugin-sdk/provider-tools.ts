@@ -22,6 +22,17 @@ type ReadProviderToolSnapshot =
       parameters?: undefined;
     };
 
+function unreadableProviderToolSchemaDiagnostic(
+  name: string,
+  toolIndex: number,
+): ProviderToolSchemaDiagnostic {
+  return {
+    toolName: name,
+    toolIndex,
+    violations: [`${name}.parameters is unreadable`],
+  };
+}
+
 function readProviderToolSnapshot(tool: AnyAgentTool, toolIndex: number): ReadProviderToolSnapshot {
   let name: string;
   try {
@@ -51,6 +62,18 @@ function readProviderToolSnapshot(tool: AnyAgentTool, toolIndex: number): ReadPr
   }
 
   return { tool, name, parameters };
+}
+
+function readProviderCompatText(source: unknown, key: string): string {
+  if (!source || typeof source !== "object") {
+    return "";
+  }
+  try {
+    const value = Reflect.get(source, key);
+    return typeof value === "string" ? value.trim().toLowerCase() : "";
+  } catch {
+    return "";
+  }
 }
 
 function withProviderToolParameters(
@@ -160,41 +183,68 @@ export function findUnsupportedSchemaKeywords(
   /** Schema keywords unsupported by the target provider family. */
   unsupportedKeywords: ReadonlySet<string>,
 ): string[] {
-  if (!schema || typeof schema !== "object") {
-    return [];
+  try {
+    if (!schema || typeof schema !== "object") {
+      return [];
+    }
+    if (Array.isArray(schema)) {
+      return schema.flatMap((item, index) =>
+        findUnsupportedSchemaKeywords(item, `${path}[${index}]`, unsupportedKeywords),
+      );
+    }
+    const record = schema as Record<string, unknown>;
+    const violations: string[] = [];
+    const properties =
+      record.properties &&
+      typeof record.properties === "object" &&
+      !Array.isArray(record.properties)
+        ? (record.properties as Record<string, unknown>)
+        : undefined;
+    if (properties) {
+      for (const [key, value] of Object.entries(properties)) {
+        violations.push(
+          ...findUnsupportedSchemaKeywords(value, `${path}.properties.${key}`, unsupportedKeywords),
+        );
+      }
+    }
+    for (const [key, value] of Object.entries(record)) {
+      if (key === "properties") {
+        continue;
+      }
+      if (unsupportedKeywords.has(key)) {
+        violations.push(`${path}.${key}`);
+      }
+      if (value && typeof value === "object") {
+        violations.push(
+          ...findUnsupportedSchemaKeywords(value, `${path}.${key}`, unsupportedKeywords),
+        );
+      }
+    }
+    return violations;
+  } catch {
+    return [path];
   }
-  if (Array.isArray(schema)) {
-    return schema.flatMap((item, index) =>
-      findUnsupportedSchemaKeywords(item, `${path}[${index}]`, unsupportedKeywords),
+}
+
+function inspectProviderToolSchemaKeywords(
+  snapshot: Extract<ReadProviderToolSnapshot, { tool: AnyAgentTool }>,
+  toolIndex: number,
+  unsupportedKeywords: ReadonlySet<string>,
+): ProviderToolSchemaDiagnostic | undefined {
+  let violations: string[];
+  try {
+    violations = findUnsupportedSchemaKeywords(
+      snapshot.parameters,
+      `${snapshot.name}.parameters`,
+      unsupportedKeywords,
     );
+  } catch {
+    return unreadableProviderToolSchemaDiagnostic(snapshot.name, toolIndex);
   }
-  const record = schema as Record<string, unknown>;
-  const violations: string[] = [];
-  const properties =
-    record.properties && typeof record.properties === "object" && !Array.isArray(record.properties)
-      ? (record.properties as Record<string, unknown>)
-      : undefined;
-  if (properties) {
-    for (const [key, value] of Object.entries(properties)) {
-      violations.push(
-        ...findUnsupportedSchemaKeywords(value, `${path}.properties.${key}`, unsupportedKeywords),
-      );
-    }
+  if (violations.length === 0) {
+    return undefined;
   }
-  for (const [key, value] of Object.entries(record)) {
-    if (key === "properties") {
-      continue;
-    }
-    if (unsupportedKeywords.has(key)) {
-      violations.push(`${path}.${key}`);
-    }
-    if (value && typeof value === "object") {
-      violations.push(
-        ...findUnsupportedSchemaKeywords(value, `${path}.${key}`, unsupportedKeywords),
-      );
-    }
-  }
-  return violations;
+  return { toolName: snapshot.name, toolIndex, violations };
 }
 
 /**
@@ -214,7 +264,13 @@ export function normalizeGeminiToolSchemas(
       tools.push(tool);
       continue;
     }
-    pushToolWithProviderParameters(tools, snapshot, cleanSchemaForGemini(snapshot.parameters));
+    let parameters: TSchema;
+    try {
+      parameters = cleanSchemaForGemini(snapshot.parameters);
+    } catch {
+      continue;
+    }
+    pushToolWithProviderParameters(tools, snapshot, parameters);
   }
   return tools;
 }
@@ -231,15 +287,12 @@ export function inspectGeminiToolSchemas(
     if (snapshot.diagnostic) {
       return [snapshot.diagnostic];
     }
-    const violations = findUnsupportedSchemaKeywords(
-      snapshot.parameters,
-      `${snapshot.name}.parameters`,
+    const diagnostic = inspectProviderToolSchemaKeywords(
+      snapshot,
+      toolIndex,
       GEMINI_UNSUPPORTED_SCHEMA_KEYWORDS,
     );
-    if (violations.length === 0) {
-      return [];
-    }
-    return [{ toolName: snapshot.name, toolIndex, violations }];
+    return diagnostic ? [diagnostic] : [];
   });
 }
 
@@ -260,18 +313,26 @@ export function normalizeOpenAIToolSchemas(
       continue;
     }
     if (snapshot.parameters == null) {
-      pushToolWithProviderParameters(tools, snapshot, normalizeOpenAIStrictCompatSchema({}));
+      let parameters: TSchema;
+      try {
+        parameters = normalizeOpenAIStrictCompatSchema({});
+      } catch {
+        continue;
+      }
+      pushToolWithProviderParameters(tools, snapshot, parameters);
       continue;
     }
     if (typeof snapshot.parameters !== "object") {
       tools.push(tool);
       continue;
     }
-    pushToolWithProviderParameters(
-      tools,
-      snapshot,
-      normalizeOpenAIStrictCompatSchema(snapshot.parameters),
-    );
+    let parameters: TSchema;
+    try {
+      parameters = normalizeOpenAIStrictCompatSchema(snapshot.parameters);
+    } catch {
+      continue;
+    }
+    pushToolWithProviderParameters(tools, snapshot, parameters);
   }
   return tools;
 }
@@ -283,9 +344,10 @@ function normalizeOpenAIStrictCompatSchema(schema: unknown): TSchema {
 }
 
 function shouldApplyOpenAIToolCompat(ctx: ProviderNormalizeToolSchemasContext): boolean {
-  const provider = (ctx.model?.provider ?? ctx.provider ?? "").trim().toLowerCase();
-  const api = (ctx.model?.api ?? ctx.modelApi ?? "").trim().toLowerCase();
-  const baseUrl = (ctx.model?.baseUrl ?? "").trim().toLowerCase();
+  const provider =
+    readProviderCompatText(ctx.model, "provider") || readProviderCompatText(ctx, "provider");
+  const api = readProviderCompatText(ctx.model, "api") || readProviderCompatText(ctx, "modelApi");
+  const baseUrl = readProviderCompatText(ctx.model, "baseUrl");
 
   if (provider === "openai") {
     if (api === "openai-responses") {
@@ -297,12 +359,6 @@ function shouldApplyOpenAIToolCompat(ctx: ProviderNormalizeToolSchemasContext): 
       api === "openai-chatgpt-responses" &&
       // Codex/ChatGPT Responses uses the same strict object-schema contract as native
       // OpenAI Responses, but only on the known first-party backend URLs.
-      (!baseUrl || isOpenAIResponsesBaseUrl(baseUrl) || isOpenAICodexBaseUrl(baseUrl))
-    );
-  }
-  if (provider === "openai") {
-    return (
-      api === "openai-chatgpt-responses" &&
       (!baseUrl || isOpenAIResponsesBaseUrl(baseUrl) || isOpenAICodexBaseUrl(baseUrl))
     );
   }
@@ -458,72 +514,78 @@ export function findOpenAIStrictSchemaViolations(
   /** Strictness controls for the current schema position. */
   options?: { requireObjectRoot?: boolean },
 ): string[] {
-  if (Array.isArray(schema)) {
-    if (options?.requireObjectRoot) {
-      return [`${path}.type`];
+  try {
+    if (Array.isArray(schema)) {
+      if (options?.requireObjectRoot) {
+        return [`${path}.type`];
+      }
+      return schema.flatMap((item, index) =>
+        findOpenAIStrictSchemaViolations(item, `${path}[${index}]`),
+      );
     }
-    return schema.flatMap((item, index) =>
-      findOpenAIStrictSchemaViolations(item, `${path}[${index}]`),
-    );
-  }
-  if (!schema || typeof schema !== "object") {
-    if (options?.requireObjectRoot) {
-      return [`${path}.type`];
+    if (!schema || typeof schema !== "object") {
+      if (options?.requireObjectRoot) {
+        return [`${path}.type`];
+      }
+      return [];
     }
-    return [];
-  }
 
-  const record = schema as Record<string, unknown>;
-  const violations: string[] = [];
-  for (const key of ["anyOf", "oneOf", "allOf"] as const) {
-    if (Array.isArray(record[key])) {
-      violations.push(`${path}.${key}`);
+    const record = schema as Record<string, unknown>;
+    const violations: string[] = [];
+    for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+      if (Array.isArray(record[key])) {
+        violations.push(`${path}.${key}`);
+      }
     }
-  }
-  if (Array.isArray(record.type)) {
-    violations.push(`${path}.type`);
-  }
-
-  const properties =
-    record.properties && typeof record.properties === "object" && !Array.isArray(record.properties)
-      ? (record.properties as Record<string, unknown>)
-      : undefined;
-
-  if (record.type === "object") {
-    if (record.additionalProperties !== false) {
-      violations.push(`${path}.additionalProperties`);
+    if (Array.isArray(record.type)) {
+      violations.push(`${path}.type`);
     }
-    const required = Array.isArray(record.required)
-      ? record.required.filter((entry): entry is string => typeof entry === "string")
-      : undefined;
-    if (!required) {
-      violations.push(`${path}.required`);
-    } else if (properties) {
-      const requiredSet = new Set(required);
-      for (const key of Object.keys(properties)) {
-        if (!requiredSet.has(key)) {
-          violations.push(`${path}.required.${key}`);
+
+    const properties =
+      record.properties &&
+      typeof record.properties === "object" &&
+      !Array.isArray(record.properties)
+        ? (record.properties as Record<string, unknown>)
+        : undefined;
+
+    if (record.type === "object") {
+      if (record.additionalProperties !== false) {
+        violations.push(`${path}.additionalProperties`);
+      }
+      const required = Array.isArray(record.required)
+        ? record.required.filter((entry): entry is string => typeof entry === "string")
+        : undefined;
+      if (!required) {
+        violations.push(`${path}.required`);
+      } else if (properties) {
+        const requiredSet = new Set(required);
+        for (const key of Object.keys(properties)) {
+          if (!requiredSet.has(key)) {
+            violations.push(`${path}.required.${key}`);
+          }
         }
       }
     }
-  }
 
-  if (properties) {
-    for (const [key, value] of Object.entries(properties)) {
-      violations.push(...findOpenAIStrictSchemaViolations(value, `${path}.properties.${key}`));
+    if (properties) {
+      for (const [key, value] of Object.entries(properties)) {
+        violations.push(...findOpenAIStrictSchemaViolations(value, `${path}.properties.${key}`));
+      }
     }
-  }
 
-  for (const [key, value] of Object.entries(record)) {
-    if (key === "properties") {
-      continue;
+    for (const [key, value] of Object.entries(record)) {
+      if (key === "properties") {
+        continue;
+      }
+      if (value && typeof value === "object") {
+        violations.push(...findOpenAIStrictSchemaViolations(value, `${path}.${key}`));
+      }
     }
-    if (value && typeof value === "object") {
-      violations.push(...findOpenAIStrictSchemaViolations(value, `${path}.${key}`));
-    }
-  }
 
-  return violations;
+    return violations;
+  } catch {
+    return [path];
+  }
 }
 
 /**
@@ -664,7 +726,12 @@ export function normalizeDeepSeekToolSchemas(
       tools.push(tool);
       continue;
     }
-    const parameters = normalizeDeepSeekSchema(snapshot.parameters);
+    let parameters: unknown;
+    try {
+      parameters = normalizeDeepSeekSchema(snapshot.parameters);
+    } catch {
+      continue;
+    }
     if (parameters === snapshot.parameters) {
       tools.push(tool);
       continue;
@@ -686,15 +753,12 @@ export function inspectDeepSeekToolSchemas(
     if (snapshot.diagnostic) {
       return [snapshot.diagnostic];
     }
-    const violations = findUnsupportedSchemaKeywords(
-      snapshot.parameters,
-      `${snapshot.name}.parameters`,
+    const diagnostic = inspectProviderToolSchemaKeywords(
+      snapshot,
+      toolIndex,
       DEEPSEEK_UNSUPPORTED_SCHEMA_KEYWORDS,
     );
-    if (violations.length === 0) {
-      return [];
-    }
-    return [{ toolName: snapshot.name, toolIndex, violations }];
+    return diagnostic ? [diagnostic] : [];
   });
 }
 
