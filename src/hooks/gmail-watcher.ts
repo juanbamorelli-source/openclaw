@@ -10,6 +10,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { runCommandWithTimeout } from "../process/exec.js";
 import { hasBinary } from "../skills/loading/config.js";
+import { checkGmailWatchDeliverySupported } from "./gmail-gog-capability.js";
 import { ensureTailscaleEndpoint } from "./gmail-setup-utils.js";
 import { isAddressInUseError } from "./gmail-watcher-errors.js";
 import {
@@ -284,6 +285,7 @@ export async function startGmailWatcher(
   if (isGmailWatcherStartCancelled(options)) {
     return cancelledGmailWatcherStart(runtimeConfig);
   }
+
   currentConfig = runtimeConfig;
 
   // Stop any existing watcher before doing async setup so a re-entry
@@ -310,6 +312,23 @@ export async function startGmailWatcher(
       oldProcess.removeAllListeners();
     }
     shuttingDown = false;
+  }
+
+  if (!isGmailHookPushRuntimeConfig(runtimeConfig)) {
+    const supportCancellation = createGmailWatcherCancellation(options);
+    try {
+      const deliverySupport = await checkGmailWatchDeliverySupported(runtimeConfig, {
+        signal: supportCancellation.signal,
+      });
+      if (supportCancellation.isCancelled()) {
+        return cancelledGmailWatcherStart(runtimeConfig);
+      }
+      if (!deliverySupport.ok) {
+        return { started: false, reason: deliverySupport.error };
+      }
+    } finally {
+      supportCancellation.dispose();
+    }
   }
 
   // Set up Tailscale endpoint if needed
@@ -354,7 +373,7 @@ export async function startGmailWatcher(
     log.warn("gmail watch start failed, but continuing with serve");
   }
 
-  // Spawn the gog serve process
+  // Spawn the gog delivery process
   if (isGmailWatcherStartCancelled(options)) {
     return cancelledGmailWatcherStart(runtimeConfig);
   }

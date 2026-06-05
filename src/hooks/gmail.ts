@@ -350,6 +350,10 @@ export function buildGogWatchPullArgs(cfg: GmailHookPullRuntimeConfig): string[]
   return args;
 }
 
+export function buildGogWatchPullHelpArgs(): string[] {
+  return ["gmail", "watch", "pull", "--help"];
+}
+
 function removeGogWatchSensitiveArgs(args: string[]): string[] {
   return args.filter(
     (arg, index, args) =>

@@ -13,6 +13,7 @@ import {
 import { runCommandWithTimeout } from "../process/exec.js";
 import { defaultRuntime } from "../runtime.js";
 import { displayPath } from "../utils.js";
+import { checkGmailWatchDeliverySupported } from "./gmail-gog-capability.js";
 import {
   ensureDependency,
   ensureGcloudAuth,
@@ -218,6 +219,10 @@ export async function runGmailSetup(opts: GmailSetupOptions) {
         label,
         topic: topicPath,
         subscription,
+        delivery: {
+          mode: "push",
+          subscription,
+        },
         pushToken,
         hookUrl,
         includeBody,
@@ -307,6 +312,10 @@ export async function runGmailService(opts: GmailRunOptions) {
   }
 
   const runtimeConfig = resolved.value;
+  const deliverySupport = await checkGmailWatchDeliverySupported(runtimeConfig);
+  if (!deliverySupport.ok) {
+    throw new Error(deliverySupport.error);
+  }
 
   if (isGmailHookPushRuntimeConfig(runtimeConfig) && runtimeConfig.tailscale.mode !== "off") {
     await ensureDependency("tailscale", ["tailscale"]);

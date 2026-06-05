@@ -96,7 +96,12 @@ describe("startGmailWatcher", () => {
       started: true,
     });
 
-    expect(mocks.runCommandWithTimeout).toHaveBeenCalledTimes(1);
+    expect(mocks.runCommandWithTimeout).toHaveBeenCalledTimes(2);
+    expect(mocks.runCommandWithTimeout).toHaveBeenNthCalledWith(
+      1,
+      ["gog", "gmail", "watch", "pull", "--help"],
+      expect.objectContaining({ timeoutMs: 30000 }),
+    );
     expect(mocks.spawn).toHaveBeenCalledTimes(1);
     const spawnArgs = mocks.spawn.mock.calls[0]?.[1] as string[];
     expect(spawnArgs).toContain("pull");
@@ -116,6 +121,71 @@ describe("startGmailWatcher", () => {
         "hook-token",
       ]),
     );
+  });
+
+  it("does not spawn pull delivery when installed gog lacks pull support", async () => {
+    mocks.runCommandWithTimeout.mockResolvedValue({
+      code: 1,
+      stdout: "",
+      stderr: "unknown command pull",
+    });
+
+    await expect(startGmailWatcher(createGmailPullConfig())).resolves.toEqual({
+      started: false,
+      reason: expect.stringContaining("gog gmail watch pull is unavailable"),
+    });
+
+    expect(mocks.runCommandWithTimeout).toHaveBeenCalledTimes(1);
+    expect(mocks.runCommandWithTimeout).toHaveBeenCalledWith(
+      ["gog", "gmail", "watch", "pull", "--help"],
+      expect.objectContaining({ timeoutMs: 30000 }),
+    );
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it("stops an existing watcher before rejecting unsupported pull delivery", async () => {
+    vi.useFakeTimers();
+    try {
+      const spawnedChildren: Array<
+        EventEmitter & { kill: ReturnType<typeof vi.fn>; killed: boolean }
+      > = [];
+      mocks.spawn.mockImplementation(() => {
+        const child = new EventEmitter();
+        const mockedChild = Object.assign(child, {
+          kill: vi.fn(() => {
+            queueMicrotask(() => child.emit("exit", null, "SIGTERM"));
+            return true;
+          }),
+          killed: false,
+        });
+        spawnedChildren.push(mockedChild);
+        return mockedChild;
+      });
+      mocks.runCommandWithTimeout
+        .mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" })
+        .mockResolvedValueOnce({
+          code: 1,
+          stdout: "",
+          stderr: "unknown command pull",
+        });
+
+      await expect(startGmailWatcher(createGmailConfig())).resolves.toEqual({
+        started: true,
+      });
+      expect(mocks.spawn).toHaveBeenCalledTimes(1);
+
+      await expect(startGmailWatcher(createGmailPullConfig())).resolves.toEqual({
+        started: false,
+        reason: expect.stringContaining("gog gmail watch pull is unavailable"),
+      });
+
+      expect(spawnedChildren[0]?.kill).toHaveBeenCalledWith("SIGTERM");
+      spawnedChildren[0]?.emit("exit", 1, null);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(mocks.spawn).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not let a stale cancelled startup clear newer watcher config", async () => {
