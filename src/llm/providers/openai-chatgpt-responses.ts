@@ -207,8 +207,8 @@ export const streamOpenAICodexResponses: StreamFunction<
       role: "assistant",
       content: [],
       api: "openai-chatgpt-responses" as Api,
-      provider: model.provider,
-      model: model.id,
+      provider: readOpenAICodexOutputString(model, "provider"),
+      model: readOpenAICodexOutputString(model, "id"),
       usage: {
         input: 0,
         output: 0,
@@ -443,6 +443,18 @@ export const streamOpenAICodexResponses: StreamFunction<
 
   return stream;
 };
+
+function readOpenAICodexOutputString(
+  model: Model<"openai-chatgpt-responses">,
+  key: "id" | "provider",
+): string {
+  try {
+    const value = model[key];
+    return typeof value === "string" && value.length > 0 ? value : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
 
 export const streamSimpleOpenAICodexResponses: StreamFunction<
   "openai-chatgpt-responses",

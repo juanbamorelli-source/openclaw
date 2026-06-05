@@ -99,6 +99,48 @@ describe("streamOpenAICodexResponses transport", () => {
     messages: [{ role: "user", content: "hi", timestamp: 1 }],
   } satisfies Context;
 
+  it("keeps unreadable output identity inside the stream error path", async () => {
+    const hostileModel = { ...model };
+    Object.defineProperties(hostileModel, {
+      provider: {
+        enumerable: true,
+        get() {
+          throw new Error("revoked provider");
+        },
+      },
+      id: {
+        enumerable: true,
+        get() {
+          throw new Error("revoked model id");
+        },
+      },
+    });
+    const fetchMock = vi.fn(async () => {
+      throw new Error("fetch should not run");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onPayload = vi.fn();
+
+    const stream = streamOpenAICodexResponses(hostileModel, context, {
+      apiKey: createJwt({
+        "https://api.openai.com/auth": {
+          chatgpt_account_id: "acct-1",
+        },
+      }),
+      transport: "sse",
+      onPayload,
+    });
+
+    const result = await stream.result();
+
+    expect(result.stopReason).toBe("error");
+    expect(result.provider).toBe("unknown");
+    expect(result.model).toBe("unknown");
+    expect(result.errorMessage).toBe("revoked model id");
+    expect(onPayload).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("does not fall back to SSE when websocket transport is explicit", async () => {
     const fetchMock = vi.fn(async () => {
       throw new Error("fetch should not run");
