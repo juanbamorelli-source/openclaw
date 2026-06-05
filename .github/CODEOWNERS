@@ -58,6 +58,12 @@
 /docs/reference/secretref-credential-surface.md @openclaw/openclaw-secops
 /docs/reference/secretref-user-supplied-credentials-matrix.json @openclaw/openclaw-secops
 
+# Heartbeat runtime templates and repair logic affect scheduled API call behavior.
+# Changes require maintainer review to prevent template/content mismatches that
+# cause silent heartbeat regressions or unintended API call triggers.
+/src/agents/templates/ @hxy91819 @vincentkoc
+/src/commands/doctor-heartbeat-template-repair.ts @hxy91819 @vincentkoc
+
 # Release workflow and its supporting release-path checks.
 /.github/workflows/openclaw-npm-release.yml @openclaw/openclaw-release-managers
 /docs/reference/RELEASING.md @openclaw/openclaw-release-managers
