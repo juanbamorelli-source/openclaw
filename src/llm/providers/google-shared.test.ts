@@ -5,7 +5,10 @@ import type { AssistantMessage, Model } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import {
   buildGoogleGenerateContentParams,
+  buildGoogleSimpleThinking,
   consumeGoogleGenerateContentStream,
+  getDisabledGoogleThinkingConfig,
+  isGemini3ProModel,
 } from "./google-shared.js";
 
 const model: Model<"google-generative-ai"> = {
@@ -145,5 +148,24 @@ describe("buildGoogleGenerateContentParams", () => {
     );
 
     expect(params.config?.stopSequences).toEqual(["STOP"]);
+  });
+});
+
+describe("Google thinking model metadata", () => {
+  it("ignores unreadable model ids while resolving thinking controls", () => {
+    const hostileModel = Object.defineProperty({ ...model }, "id", {
+      get() {
+        throw new Error("id getter should not be invoked");
+      },
+    }) as Model<"google-generative-ai">;
+
+    expect(isGemini3ProModel(hostileModel)).toBe(false);
+    expect(buildGoogleSimpleThinking(hostileModel, { reasoning: "high" })).toEqual({
+      enabled: true,
+      budgetTokens: -1,
+    });
+    expect(getDisabledGoogleThinkingConfig(hostileModel, { includeGemma4: true })).toEqual({
+      thinkingBudget: 0,
+    });
   });
 });
