@@ -4,6 +4,7 @@
  * Harnesses use this to dispatch after-tool-call and before-message-write hooks
  * while isolating hook failures from the runtime path.
  */
+import { formatErrorMessage } from "../../infra/errors.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { consumeAdjustedParamsForToolCall } from "../agent-tools.before-tool-call.js";
@@ -57,7 +58,9 @@ export async function runAgentHarnessAfterToolCallHook(params: {
       },
     );
   } catch (error) {
-    log.warn(`after_tool_call hook failed: tool=${params.toolName} error=${String(error)}`);
+    log.warn(
+      `after_tool_call hook failed: tool=${params.toolName} error=${formatErrorMessage(error)}`,
+    );
   }
 }
 

@@ -28,6 +28,28 @@ const EVENT = {
   success: true,
 };
 
+function createHostileThrownValue(): unknown {
+  return new Proxy(
+    {},
+    {
+      get() {
+        throw new Error("property trap");
+      },
+      getPrototypeOf() {
+        throw new Error("prototype trap");
+      },
+      ownKeys() {
+        throw new Error("ownKeys trap");
+      },
+    },
+  );
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 describe("agent harness lifecycle hook helpers", () => {
   afterEach(() => {
     clearAgentHarnessFinalizeRetryBudget();
@@ -116,6 +138,51 @@ describe("agent harness lifecycle hook helpers", () => {
     );
   });
 
+  it("keeps hostile llm hook failures non-fatal", async () => {
+    const hookRunner = {
+      hasHooks: vi.fn((hookName: string) => hookName === "llm_input" || hookName === "llm_output"),
+      runLlmInput: vi.fn(async () => {
+        throw createHostileThrownValue();
+      }),
+      runLlmOutput: vi.fn(async () => {
+        throw createHostileThrownValue();
+      }),
+    };
+
+    runAgentHarnessLlmInputHook({
+      ctx: { runId: "run-1", sessionKey: "agent:main:session-1" },
+      event: {},
+      hookRunner: hookRunner as never,
+    });
+    runAgentHarnessLlmOutputHook({
+      ctx: { runId: "run-1", sessionKey: "agent:main:session-1" },
+      event: {},
+      hookRunner: hookRunner as never,
+    });
+
+    await flushMicrotasks();
+
+    expect(hookRunner.runLlmInput).toHaveBeenCalledTimes(1);
+    expect(hookRunner.runLlmOutput).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps hostile agent_end hook failures non-fatal", async () => {
+    const hookRunner = {
+      hasHooks: vi.fn((hookName: string) => hookName === "agent_end"),
+      runAgentEnd: vi.fn(async () => {
+        throw createHostileThrownValue();
+      }),
+    };
+
+    await expect(
+      awaitAgentHarnessAgentEndHook({
+        ctx: { runId: "run-1", sessionKey: "agent:main:session-1" },
+        event: EVENT,
+        hookRunner: hookRunner as never,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it("continues when legacy hook runners advertise before_agent_finalize without a runner method", async () => {
     await expect(
       runAgentHarnessBeforeAgentFinalizeHook({
@@ -123,6 +190,23 @@ describe("agent harness lifecycle hook helpers", () => {
         event: {},
         hookRunner: createLegacyHookRunner(),
       } as never),
+    ).resolves.toEqual({ action: "continue" });
+  });
+
+  it("continues when before_agent_finalize throws a hostile value", async () => {
+    const hookRunner = {
+      hasHooks: vi.fn((hookName: string) => hookName === "before_agent_finalize"),
+      runBeforeAgentFinalize: vi.fn(async () => {
+        throw createHostileThrownValue();
+      }),
+    };
+
+    await expect(
+      runAgentHarnessBeforeAgentFinalizeHook({
+        ctx: { runId: "run-1", sessionKey: "agent:main:session-1" },
+        event: EVENT,
+        hookRunner: hookRunner as never,
+      }),
     ).resolves.toEqual({ action: "continue" });
   });
 

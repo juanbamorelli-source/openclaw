@@ -6,6 +6,7 @@
  */
 import { createHash } from "node:crypto";
 import { normalizeOptionalString as normalizeTrimmedString } from "@openclaw/normalization-core/string-coerce";
+import { formatErrorMessage } from "../../infra/errors.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import type {
@@ -87,7 +88,7 @@ export function runAgentHarnessLlmInputHook(params: {
   void hookRunner
     .runLlmInput(params.event, buildAgentHookContext(params.ctx))
     .catch((error: unknown) => {
-      log.warn(`llm_input hook failed: ${String(error)}`);
+      log.warn(`llm_input hook failed: ${formatErrorMessage(error)}`);
     });
 }
 
@@ -104,7 +105,7 @@ export function runAgentHarnessLlmOutputHook(params: {
   void hookRunner
     .runLlmOutput(params.event, buildAgentHookContext(params.ctx))
     .catch((error: unknown) => {
-      log.warn(`llm_output hook failed: ${String(error)}`);
+      log.warn(`llm_output hook failed: ${formatErrorMessage(error)}`);
     });
 }
 
@@ -122,7 +123,7 @@ async function executeAgentHarnessAgentEndHook(params: {
     const options: VoidHookRunOptions = { unrefTimeout: params.unrefTimeout ?? false };
     await hookRunner.runAgentEnd(params.event, buildAgentHookContext(params.ctx), options);
   } catch (error) {
-    log.warn(`agent_end hook failed: ${String(error)}`);
+    log.warn(`agent_end hook failed: ${formatErrorMessage(error)}`);
   }
 }
 
@@ -176,7 +177,7 @@ export async function runAgentHarnessBeforeAgentFinalizeHook(params: {
       eventForNormalization,
     );
   } catch (error) {
-    log.warn(`before_agent_finalize hook failed: ${String(error)}`);
+    log.warn(`before_agent_finalize hook failed: ${formatErrorMessage(error)}`);
     return { action: "continue" };
   }
 }

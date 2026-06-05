@@ -4,6 +4,7 @@
  * Harness runtimes use this to run plugin hooks around prompt construction and
  * compaction while keeping hook failures non-fatal.
  */
+import { formatErrorMessage } from "../../infra/errors.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import type {
@@ -47,13 +48,15 @@ export async function resolveAgentHarnessBeforePromptBuildResult(params: {
   // before_agent_start hook during the prompt-build migration window.
   const promptBuildResult = hookRunner.hasHooks("before_prompt_build")
     ? await hookRunner.runBeforePromptBuild(promptEvent, hookCtx).catch((error: unknown) => {
-        log.warn(`before_prompt_build hook failed: ${String(error)}`);
+        log.warn(`before_prompt_build hook failed: ${formatErrorMessage(error)}`);
         return undefined;
       })
     : undefined;
   const beforeAgentStartResult = hookRunner.hasHooks("before_agent_start")
     ? await hookRunner.runBeforeAgentStart(promptEvent, hookCtx).catch((error: unknown) => {
-        log.warn(`deprecated before_agent_start hook failed during prompt build: ${String(error)}`);
+        log.warn(
+          `deprecated before_agent_start hook failed during prompt build: ${formatErrorMessage(error)}`,
+        );
         return undefined;
       })
     : undefined;
@@ -115,7 +118,7 @@ export async function runAgentHarnessBeforeCompactionHook(params: {
       buildAgentHookContext(params.ctx),
     );
   } catch (error) {
-    log.warn(`before_compaction hook failed: ${String(error)}`);
+    log.warn(`before_compaction hook failed: ${formatErrorMessage(error)}`);
   }
 }
 
@@ -140,6 +143,6 @@ export async function runAgentHarnessAfterCompactionHook(params: {
       buildAgentHookContext(params.ctx),
     );
   } catch (error) {
-    log.warn(`after_compaction hook failed: ${String(error)}`);
+    log.warn(`after_compaction hook failed: ${formatErrorMessage(error)}`);
   }
 }
