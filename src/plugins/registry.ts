@@ -2274,8 +2274,48 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     });
   };
 
+  const readToolMetadataFields = (
+    record: PluginRecord,
+    metadata: PluginToolMetadataRegistration,
+  ):
+    | {
+        toolName: unknown;
+        displayName: unknown;
+        description: unknown;
+        risk: unknown;
+        tags: unknown;
+      }
+    | undefined => {
+    let toolName: unknown;
+    try {
+      toolName = metadata.toolName;
+      return {
+        toolName,
+        displayName: metadata.displayName,
+        description: metadata.description,
+        risk: metadata.risk,
+        tags: metadata.tags,
+      };
+    } catch (error) {
+      const normalizedToolName = normalizeOptionalHostHookString(toolName);
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message:
+          `tool metadata registration has unreadable fields` +
+          `${normalizedToolName ? `: ${normalizedToolName}` : ""}: ${formatErrorMessage(error)}`,
+      });
+      return undefined;
+    }
+  };
+
   const registerToolMetadata = (record: PluginRecord, metadata: PluginToolMetadataRegistration) => {
-    const toolName = normalizeHostHookString(metadata.toolName);
+    const fields = readToolMetadataFields(record, metadata);
+    if (!fields) {
+      return;
+    }
+    const toolName = normalizeHostHookString(fields.toolName);
     if (!toolName) {
       pushDiagnostic({
         level: "error",
@@ -2317,14 +2357,16 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       });
       return;
     }
-    const displayName = normalizeOptionalHostHookString(metadata.displayName);
-    const description = normalizeOptionalHostHookString(metadata.description);
-    const tags = normalizeHostHookStringList(metadata.tags);
+    const displayName = normalizeOptionalHostHookString(fields.displayName);
+    const description = normalizeOptionalHostHookString(fields.description);
+    const tags = normalizeHostHookStringList(fields.tags);
+    const risk = fields.risk;
     if (
       displayName === "" ||
       description === "" ||
       tags === null ||
-      (metadata.risk !== undefined && !["low", "medium", "high"].includes(metadata.risk))
+      (risk !== undefined &&
+        (typeof risk !== "string" || !["low", "medium", "high"].includes(risk)))
     ) {
       pushDiagnostic({
         level: "error",
@@ -2338,10 +2380,12 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       pluginId: record.id,
       pluginName: record.name,
       metadata: {
-        ...metadata,
         toolName,
         ...(displayName !== undefined ? { displayName } : {}),
         ...(description !== undefined ? { description } : {}),
+        ...(risk !== undefined
+          ? { risk: risk as NonNullable<PluginToolMetadataRegistration["risk"]> }
+          : {}),
         ...(tags !== undefined ? { tags } : {}),
       },
       source: record.source,
