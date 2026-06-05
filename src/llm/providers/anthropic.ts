@@ -1578,12 +1578,27 @@ function resolveAnthropicToolChoice(
     }
     return choice;
   }
-  if (tools.some((tool) => tool.name === choice.name)) {
+  const requiredName = readAnthropicForcedToolChoiceName(choice);
+  if (!requiredName) {
+    throw new Error("Anthropic forced toolChoice name is unreadable");
+  }
+  if (tools.some((tool) => tool.name === requiredName)) {
     return choice;
   }
   throw new Error(
-    `Anthropic forced toolChoice "${choice.name}" is unavailable after tool schema filtering`,
+    `Anthropic forced toolChoice "${requiredName}" is unavailable after tool schema filtering`,
   );
+}
+
+function readAnthropicForcedToolChoiceName(
+  choice: Extract<AnthropicOptions["toolChoice"], { type: "tool" }>,
+): string | undefined {
+  try {
+    const name = choice.name;
+    return typeof name === "string" && name.length > 0 ? name : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function mapStopReason(reason: string): StopReason {

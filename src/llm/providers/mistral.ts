@@ -551,7 +551,10 @@ function resolveMistralToolChoice(
     return choice;
   }
   if (typeof choice !== "string") {
-    const requiredName = choice.function.name;
+    const requiredName = readMistralForcedToolChoiceName(choice);
+    if (!requiredName) {
+      throw new Error("Mistral forced toolChoice name is unreadable");
+    }
     if (tools.some((tool) => tool.name === requiredName)) {
       return choice;
     }
@@ -848,10 +851,25 @@ function mapToolChoice(
   if (choice === "auto" || choice === "none" || choice === "any" || choice === "required") {
     return choice;
   }
+  const name = readMistralForcedToolChoiceName(choice);
+  if (!name) {
+    throw new Error("Mistral forced toolChoice name is unreadable");
+  }
   return {
     type: "function",
-    function: { name: choice.function.name },
+    function: { name },
   };
+}
+
+function readMistralForcedToolChoiceName(
+  choice: Extract<MistralOptions["toolChoice"], { type: "function" }>,
+): string | undefined {
+  try {
+    const name = choice.function.name;
+    return typeof name === "string" && name.length > 0 ? name : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function mapChatStopReason(reason: string | null): StopReason {

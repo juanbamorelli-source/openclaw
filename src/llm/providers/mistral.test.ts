@@ -196,4 +196,39 @@ describe("Mistral provider", () => {
     );
     expect(mistralMockState.payloads).toHaveLength(0);
   });
+
+  it("fails closed when forced Mistral tool choice name is unreadable", async () => {
+    const unreadableToolChoice = {
+      type: "function",
+      function: {
+        get name(): string {
+          throw new Error("revoked tool choice name");
+        },
+      },
+    };
+    const stream = streamMistral(
+      makeMistralModel(),
+      {
+        ...context,
+        tools: [
+          {
+            name: "healthy_tool",
+            description: "Still available",
+            parameters: { type: "object", properties: {} },
+          },
+        ],
+      },
+      {
+        apiKey: "sk-mistral-provider",
+        toolChoice: unreadableToolChoice as never,
+      },
+    );
+
+    const result = await stream.result();
+
+    expect(result.stopReason).toBe("error");
+    expect(result.errorMessage).toContain("Mistral forced toolChoice name is unreadable");
+    expect(result.errorMessage).not.toContain("revoked tool choice name");
+    expect(mistralMockState.payloads).toHaveLength(0);
+  });
 });

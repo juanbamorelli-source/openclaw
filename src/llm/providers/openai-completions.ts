@@ -1328,13 +1328,27 @@ function resolveOpenAICompletionsToolChoice(
     }
     return choice;
   }
-  const requiredName = choice.function.name;
+  const requiredName = readOpenAICompletionsForcedToolChoiceName(choice);
+  if (!requiredName) {
+    throw new Error("OpenAI completions forced toolChoice name is unreadable");
+  }
   if (tools.some((tool) => tool.name === requiredName)) {
     return choice;
   }
   throw new Error(
     `OpenAI completions forced toolChoice "${requiredName}" is unavailable after tool schema filtering`,
   );
+}
+
+function readOpenAICompletionsForcedToolChoiceName(
+  choice: Extract<OpenAICompletionsOptions["toolChoice"], { type: "function" }>,
+): string | undefined {
+  try {
+    const name = choice.function.name;
+    return typeof name === "string" && name.length > 0 ? name : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function parseChunkUsage(

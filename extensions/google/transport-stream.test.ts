@@ -1970,6 +1970,33 @@ describe("google transport stream", () => {
     ).toThrow(/forced toolChoice "broken_lookup" is unavailable/);
   });
 
+  it("fails closed when forced Gemini toolChoice name is unreadable", () => {
+    const unreadableToolChoice = {
+      type: "function",
+      function: {
+        get name(): string {
+          throw new Error("revoked tool choice name");
+        },
+      },
+    };
+    expect(() =>
+      buildGoogleGenerativeAiParams(
+        buildGeminiModel(),
+        {
+          messages: [{ role: "user", content: "hello", timestamp: 0 }],
+          tools: [
+            {
+              name: "safe_lookup",
+              description: "Safe",
+              parameters: { type: "object", properties: {} },
+            },
+          ],
+        } as never,
+        { toolChoice: unreadableToolChoice as never },
+      ),
+    ).toThrow("Google transport forced toolChoice name is unreadable");
+  });
+
   it("uses a non-empty text placeholder for empty user text", () => {
     const params = buildGoogleGenerativeAiParams(buildGeminiModel(), {
       messages: [

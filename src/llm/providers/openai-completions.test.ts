@@ -340,6 +340,42 @@ describe("OpenAI-compatible completions params", () => {
     );
   });
 
+  it("fails closed when forced OpenAI completions tool choice name is unreadable", async () => {
+    const unreadableToolChoice = {
+      type: "function",
+      function: {
+        get name(): string {
+          throw new Error("revoked tool choice name");
+        },
+      },
+    };
+    const stream = streamOpenAICompletions(
+      createModel(32_000),
+      {
+        ...context,
+        tools: [
+          {
+            name: "healthy_tool",
+            description: "Still available",
+            parameters: { type: "object", properties: {} },
+          },
+        ],
+      },
+      {
+        apiKey: "sk-test",
+        toolChoice: unreadableToolChoice as never,
+      },
+    );
+
+    const result = await stream.result();
+
+    expect(result.stopReason).toBe("error");
+    expect(result.errorMessage).toContain(
+      "OpenAI completions forced toolChoice name is unreadable",
+    );
+    expect(result.errorMessage).not.toContain("revoked tool choice name");
+  });
+
   it("strips the internal cache boundary from OpenAI-compatible system prompts", async () => {
     let capturedMessages: unknown;
     const stream = streamOpenAICompletions(

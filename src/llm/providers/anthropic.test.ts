@@ -198,7 +198,7 @@ describe("Anthropic provider", () => {
 
   it("forwards simple stop sequences to Anthropic stop_sequences", async () => {
     let capturedPayload: unknown;
-    const stream = streamSimpleAnthropic(
+    const stream = streamAnthropic(
       makeAnthropicModel(),
       {
         messages: [{ role: "user", content: "hello", timestamp: 0 }],
@@ -376,6 +376,38 @@ describe("Anthropic provider", () => {
     expect(result.errorMessage).toContain(
       'Anthropic forced toolChoice "revoked_schema" is unavailable after tool schema filtering',
     );
+  });
+
+  it("fails closed when forced Anthropic tool choice name is unreadable", async () => {
+    const unreadableToolChoice = {
+      type: "tool",
+      get name(): string {
+        throw new Error("revoked tool choice name");
+      },
+    };
+    const stream = streamAnthropic(
+      makeAnthropicModel(),
+      {
+        messages: [{ role: "user", content: "hello", timestamp: 0 }],
+        tools: [
+          {
+            name: "healthy_tool",
+            description: "Still available",
+            parameters: { type: "object", properties: {} },
+          },
+        ],
+      },
+      {
+        apiKey: "sk-ant-provider",
+        toolChoice: unreadableToolChoice as never,
+      },
+    );
+
+    const result = await stream.result();
+
+    expect(result.stopReason).toBe("error");
+    expect(result.errorMessage).toContain("Anthropic forced toolChoice name is unreadable");
+    expect(result.errorMessage).not.toContain("revoked tool choice name");
   });
 
   it("splits the system prompt cache boundary into cached and uncached Anthropic blocks", async () => {

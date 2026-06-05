@@ -306,7 +306,10 @@ function mapToolChoice(
     return undefined;
   }
   if (typeof choice === "object" && choice.type === "function") {
-    const functionName = choice.function.name;
+    const functionName = readGoogleTransportForcedToolChoiceName(choice);
+    if (!functionName) {
+      throw new Error("Google transport forced toolChoice name is unreadable");
+    }
     if (tools.some((tool) => tool.name === functionName)) {
       return { mode: "ANY", allowedFunctionNames: [functionName] };
     }
@@ -325,6 +328,17 @@ function mapToolChoice(
       return { mode: "ANY" };
     default:
       return tools.length > 0 ? { mode: "AUTO" } : undefined;
+  }
+}
+
+function readGoogleTransportForcedToolChoiceName(
+  choice: Extract<GoogleTransportOptions["toolChoice"], { type: "function" }>,
+): string | undefined {
+  try {
+    const name = choice.function.name;
+    return typeof name === "string" && name.length > 0 ? name : undefined;
+  } catch {
+    return undefined;
   }
 }
 
