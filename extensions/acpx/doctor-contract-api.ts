@@ -122,10 +122,12 @@ export const stateMigrations: PluginDoctorStateMigration[] = [
       );
       const existingLiveLeases = (await processLeaseStore.entries())
         .map((entry) => normalizeAcpxProcessLease(entry.value))
-        .filter(
-          (lease): lease is AcpxProcessLease =>
-            Boolean(lease) && (lease.state === "open" || lease.state === "closing"),
-        );
+        .filter((lease): lease is AcpxProcessLease => {
+          if (!lease) {
+            return false;
+          }
+          return lease.state === "open" || lease.state === "closing";
+        });
       const leaseGatewayIds = new Set(openLeases.map((lease) => lease.gatewayInstanceId));
       const onlyLeaseGatewayId = leaseGatewayIds.size === 1 ? [...leaseGatewayIds][0] : null;
       const canAdoptLegacyGateway =
