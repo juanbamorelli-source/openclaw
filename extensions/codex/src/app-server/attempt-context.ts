@@ -231,6 +231,7 @@ export async function buildCodexWorkspaceBootstrapContext(params: {
       ? selectCodexWorkspaceTurnScopedDeveloperInstructionFiles(contextFiles)
       : [];
     const heartbeatReferenceFiles = selectCodexWorkspaceHeartbeatReferenceFiles(contextFiles);
+    const compactIdentityContext = shouldCompactCodexWorkspaceIdentityContext(params.params);
     return {
       bootstrapFiles,
       contextFiles,
@@ -247,6 +248,7 @@ export async function buildCodexWorkspaceBootstrapContext(params: {
         renderCodexWorkspaceThreadDeveloperInstructions(developerInstructionFiles),
       turnScopedDeveloperInstructions: renderCodexWorkspaceCollaborationDeveloperInstructions(
         turnScopedDeveloperInstructionFiles,
+        { compact: compactIdentityContext },
       ),
       memoryCollaborationInstructions: shouldInjectCodexOpenClawPromptContext(params.params)
         ? renderCodexWorkspaceMemoryReference({
@@ -697,7 +699,11 @@ function renderCodexWorkspaceThreadDeveloperInstructions(
 
 function renderCodexWorkspaceCollaborationDeveloperInstructions(
   files: EmbeddedContextFile[],
+  options: { compact?: boolean } = {},
 ): string | undefined {
+  if (options.compact) {
+    return renderCompactCodexWorkspaceCollaborationDeveloperInstructions(files);
+  }
   return renderCodexWorkspaceDeveloperInstructions({
     files,
     header: "## OpenClaw Agent Soul",
@@ -705,6 +711,35 @@ function renderCodexWorkspaceCollaborationDeveloperInstructions(
       "OpenClaw loaded these workspace instruction files from the active agent workspace. They are the canonical definitions of who you are, how you think and work, and the human you work alongside. Internalize and follow them accordingly.",
     wrapperTag: "AGENT_SOUL",
   });
+}
+
+function renderCompactCodexWorkspaceCollaborationDeveloperInstructions(
+  files: EmbeddedContextFile[],
+): string | undefined {
+  const visibleFiles = files.filter((file) => file.content.trim().length > 0);
+  if (visibleFiles.length === 0) {
+    return undefined;
+  }
+  const lines = [
+    "## OpenClaw Agent Soul",
+    "",
+    "OpenClaw identity/persona files exist in the active agent workspace, but this is a shared or group-channel turn. Keep private user, family, and identity details out of the model context unless the user directly asks and the detail is necessary.",
+    "",
+    "Use the durable high-level behavior already present in the always-loaded OpenClaw instructions. Treat these files as lookup pointers, not pasted context:",
+    "",
+  ];
+  for (const file of visibleFiles) {
+    lines.push(`- ${file.path}`);
+  }
+  return lines.join("\n").trim();
+}
+
+function shouldCompactCodexWorkspaceIdentityContext(params: EmbeddedRunAttemptParams): boolean {
+  return Boolean(
+    readNonEmptyString(params.groupId) ||
+    readNonEmptyString(params.groupChannel) ||
+    readNonEmptyString(params.groupSpace),
+  );
 }
 
 function renderCodexWorkspaceDeveloperInstructions(params: {

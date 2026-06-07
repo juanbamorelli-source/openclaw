@@ -1,6 +1,7 @@
 /**
  * Orchestrates one embedded-agent attempt from prompt setup through stream result.
  */
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import { MAX_IMAGE_BYTES } from "@openclaw/media-core/constants";
@@ -502,6 +503,8 @@ export {
 
 const MAX_BTW_SNAPSHOT_MESSAGES = 100;
 const PROMPT_TOOL_RESULT_AGGREGATE_CAP_MULTIPLIER = 4;
+const TRAJECTORY_TEXT_INLINE_MAX_CHARS = 4096;
+const TRAJECTORY_JSON_INLINE_MAX_BYTES = 8192;
 
 function pluginMetadataSnapshotCoversProvider(
   snapshot: PluginMetadataSnapshot | undefined,
@@ -589,6 +592,53 @@ function summarizeSessionContext(messages: AgentMessage[]): {
     totalImageBlocks,
     maxMessageTextChars,
   };
+}
+
+function hashTrajectoryValue(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function summarizeLargeTrajectoryText(value: string): unknown {
+  if (value.length <= TRAJECTORY_TEXT_INLINE_MAX_CHARS) {
+    return value;
+  }
+  return {
+    truncated: true,
+    chars: value.length,
+    bytes: Buffer.byteLength(value),
+    sha256: hashTrajectoryValue(value),
+    preview: value.slice(0, TRAJECTORY_TEXT_INLINE_MAX_CHARS),
+  };
+}
+
+function summarizeLargeTrajectoryJson<T>(
+  value: T,
+  summarize: (value: T, serialized: string) => Record<string, unknown>,
+): unknown {
+  const serialized = JSON.stringify(value);
+  if (Buffer.byteLength(serialized) <= TRAJECTORY_JSON_INLINE_MAX_BYTES) {
+    return value;
+  }
+  return {
+    truncated: true,
+    bytes: Buffer.byteLength(serialized),
+    sha256: hashTrajectoryValue(serialized),
+    ...summarize(value, serialized),
+  };
+}
+
+function summarizeTrajectoryMessages(messages: AgentMessage[]): unknown {
+  return summarizeLargeTrajectoryJson(messages, (value) => ({
+    count: value.length,
+    ...summarizeSessionContext(value),
+  }));
+}
+
+function summarizeTrajectoryTools<T extends { name?: unknown }>(tools: T[]): unknown {
+  return summarizeLargeTrajectoryJson(tools, (value) => ({
+    count: value.length,
+    names: value.map((tool) => (typeof tool.name === "string" ? tool.name : "unknown")),
+  }));
 }
 
 function cloneHookMessages(messages: AgentMessage[]): AgentMessage[] {
@@ -4070,14 +4120,16 @@ export async function runEmbeddedAttempt(
             });
             const trajectoryProviderVisibleTools = toTrajectoryToolDefinitions(effectiveTools);
             trajectoryRecorder?.recordEvent("context.compiled", {
-              systemPrompt: systemPromptForHook,
+              systemPrompt: summarizeLargeTrajectoryText(systemPromptForHook),
               prompt: promptForModel,
-              messages: activeSession.messages,
-              tools: toTrajectoryToolDefinitions(
-                toolSearch.compacted ? uncompactedEffectiveTools : effectiveTools,
+              messages: summarizeTrajectoryMessages(activeSession.messages),
+              tools: summarizeTrajectoryTools(
+                toTrajectoryToolDefinitions(
+                  toolSearch.compacted ? uncompactedEffectiveTools : effectiveTools,
+                ),
               ),
               ...(toolSearch.compacted
-                ? { providerVisibleTools: trajectoryProviderVisibleTools }
+                ? { providerVisibleTools: summarizeTrajectoryTools(trajectoryProviderVisibleTools) }
                 : {}),
               imagesCount: imageResult.images.length,
               streamStrategy,
