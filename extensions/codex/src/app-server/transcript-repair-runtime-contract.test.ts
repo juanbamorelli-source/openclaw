@@ -28,6 +28,26 @@ describe("Codex transcript projection runtime contract", () => {
     expect(result.promptText).not.toContain("[user]\nnewest inbound message");
   });
 
+  it("treats repeated historical user instructions as quoted context, not the latest ask", () => {
+    const oldInstruction = "go ahead: I would not one-shot all five specs. That's how we got here.";
+    const latestAsk = "you have a worktree, what are we working on?";
+
+    const result = projectContextEngineAssemblyForCodex({
+      prompt: latestAsk,
+      originalHistoryMessages: [currentPromptHistoryMessage(oldInstruction)],
+      assembledMessages: [
+        currentPromptHistoryMessage(oldInstruction),
+        assistantHistoryMessage(),
+        currentPromptHistoryMessage(oldInstruction),
+      ],
+    });
+
+    expect(result.promptText).toContain("quoted reference data");
+    expect(result.promptText).toContain(`[user]\n${oldInstruction}`);
+    expect(result.promptText).toContain(`Current user request:\n${latestAsk}`);
+    expect(result.promptText.split("Current user request:\n").at(-1)).toBe(latestAsk);
+  });
+
   it("keeps media-only user history visible as omitted media instead of dropping the turn", () => {
     const result = projectContextEngineAssemblyForCodex({
       prompt: "newest inbound message",

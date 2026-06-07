@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { MsgContext } from "../templating.js";
 import {
   buildInboundDedupeKey,
+  claimInboundDedupe,
+  releaseInboundDedupe,
   resetInboundDedupe,
   type InboundDedupeClaimResult,
 } from "./inbound-dedupe.js";
@@ -66,6 +68,71 @@ describe("inbound dedupe", () => {
         MessageThreadId: "77",
       }),
     );
+  });
+
+  it("deduplicates Discord retries even when thread routing changes", () => {
+    const parentRoute = buildInboundDedupeKey({
+      ...sharedInboundContext,
+      OriginatingTo: "channel:c1",
+      To: "channel:c1",
+      SessionKey: "agent:main:discord:channel:c1",
+      MessageSid: "1512877821041574049",
+      MessageThreadId: undefined,
+    });
+    const threadRoute = buildInboundDedupeKey({
+      ...sharedInboundContext,
+      OriginatingTo: "channel:thread-1",
+      To: "channel:thread-1",
+      SessionKey: "agent:main:discord:channel:thread-1",
+      MessageSid: "1512877821041574049",
+      MessageThreadId: "thread-1",
+    });
+
+    expect(threadRoute).toBe(parentRoute);
+  });
+
+  it("keeps identical Discord text distinct when provider snowflakes differ", () => {
+    expect(
+      buildInboundDedupeKey({
+        ...sharedInboundContext,
+        MessageSid: "1512877821041574049",
+        Body: "go ahead: I would not one-shot all five specs",
+      }),
+    ).not.toBe(
+      buildInboundDedupeKey({
+        ...sharedInboundContext,
+        MessageSid: "1512880278086090935",
+        Body: "go ahead: I would not one-shot all five specs",
+      }),
+    );
+  });
+
+  it("claims a Discord retry as in-flight across routing changes", () => {
+    const first = {
+      ...sharedInboundContext,
+      OriginatingTo: "channel:c1",
+      To: "channel:c1",
+      SessionKey: "agent:main:discord:channel:c1",
+      MessageSid: "1512877821041574049",
+    };
+    const retry = {
+      ...sharedInboundContext,
+      OriginatingTo: "channel:thread-1",
+      To: "channel:thread-1",
+      SessionKey: "agent:main:discord:channel:thread-1",
+      MessageSid: "1512877821041574049",
+      MessageThreadId: "thread-1",
+    };
+    const firstClaim = expectClaimed(claimInboundDedupe(first), buildInboundDedupeKey(first) ?? "");
+
+    try {
+      expect(claimInboundDedupe(retry)).toEqual({
+        status: "inflight",
+        key: firstClaim,
+      });
+    } finally {
+      releaseInboundDedupe(firstClaim);
+    }
   });
 
   it("shares claim/release state across distinct module instances", async () => {

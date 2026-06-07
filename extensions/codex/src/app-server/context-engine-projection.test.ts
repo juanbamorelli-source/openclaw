@@ -48,6 +48,30 @@ describe("projectContextEngineAssemblyForCodex", () => {
     expect(result.developerInstructionAddition).toBe("memory recall");
   });
 
+  it("keeps repeated historical imperatives out of the current request section", () => {
+    const repeatedHistoricalAsk =
+      "go ahead: I would not one-shot all five specs. That's how we got here.";
+    const latestAsk = "you have a worktree, what are we working on?";
+    const result = projectContextEngineAssemblyForCodex({
+      assembledMessages: [
+        textMessage("user", repeatedHistoricalAsk),
+        textMessage("assistant", "tool call: bash [input omitted]"),
+        textMessage("user", repeatedHistoricalAsk),
+        textMessage("assistant", "I started a worktree."),
+      ],
+      originalHistoryMessages: [textMessage("user", repeatedHistoricalAsk)],
+      prompt: latestAsk,
+    });
+
+    expect(result.promptText).toContain("<conversation_context>");
+    expect(result.promptText).toContain(`[user]\n${repeatedHistoricalAsk}`);
+    expect(result.promptText).toContain(`Current user request:\n${latestAsk}`);
+
+    const currentRequestSection = result.promptText.split("Current user request:\n").at(-1);
+    expect(currentRequestSection).toBe(latestAsk);
+    expect(currentRequestSection).not.toContain(repeatedHistoricalAsk);
+  });
+
   it("preserves role order and falls back to the raw prompt for empty history", () => {
     const empty = projectContextEngineAssemblyForCodex({
       assembledMessages: [],

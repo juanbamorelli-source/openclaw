@@ -39,6 +39,30 @@ export type InboundDedupeClaimResult =
 const resolveInboundPeerId = (ctx: MsgContext) =>
   ctx.OriginatingTo ?? ctx.To ?? ctx.From ?? ctx.SessionKey;
 
+function buildInboundRouteDedupeKey(provider: string, ctx: MsgContext): string | null {
+  const accountId = normalizeOptionalString(ctx.AccountId) ?? "";
+  if (provider === "discord") {
+    // Discord snowflakes are provider-wide ids. Keep duplicate delivery
+    // idempotency independent from thread/session reroutes so a replay of the
+    // same message cannot bypass dedupe just because routing metadata changed.
+    return channelRouteDedupeKey({
+      channel: provider,
+      to: "provider-message",
+      accountId,
+    });
+  }
+  const peerId = resolveInboundPeerId(ctx);
+  if (!peerId) {
+    return null;
+  }
+  return channelRouteDedupeKey({
+    channel: provider,
+    to: peerId,
+    accountId,
+    threadId: ctx.MessageThreadId,
+  });
+}
+
 function resolveInboundDedupeSessionScope(ctx: MsgContext): string {
   const sessionKey =
     resolveCommandTurnTargetSessionKey(ctx) || normalizeOptionalString(ctx.SessionKey) || "";
@@ -61,18 +85,11 @@ export function buildInboundDedupeKey(ctx: MsgContext): string | null {
   if (!provider || !messageId) {
     return null;
   }
-  const peerId = resolveInboundPeerId(ctx);
-  if (!peerId) {
+  const sessionScope = resolveInboundDedupeSessionScope(ctx);
+  const routeKey = buildInboundRouteDedupeKey(provider, ctx);
+  if (!routeKey) {
     return null;
   }
-  const sessionScope = resolveInboundDedupeSessionScope(ctx);
-  const accountId = normalizeOptionalString(ctx.AccountId) ?? "";
-  const routeKey = channelRouteDedupeKey({
-    channel: provider,
-    to: peerId,
-    accountId,
-    threadId: ctx.MessageThreadId,
-  });
   return JSON.stringify([sessionScope, routeKey, messageId]);
 }
 

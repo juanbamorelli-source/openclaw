@@ -1752,6 +1752,26 @@ describe("processDiscordMessage session routing", () => {
     });
   });
 
+  it("passes Discord snowflakes through as the inbound dedupe message id", async () => {
+    const ctx = await createBaseContext({
+      message: {
+        id: "1512877821041574049",
+        channelId: "c1",
+        timestamp: new Date().toISOString(),
+        attachments: [],
+      },
+      route: BASE_CHANNEL_ROUTE,
+    });
+
+    await runProcessDiscordMessage(ctx);
+
+    expectRecordFields(requireRecord(getLastDispatchCtx(), "dispatch context"), {
+      MessageSid: "1512877821041574049",
+      MessageSidFull: undefined,
+      OriginatingTo: "channel:c1",
+    });
+  });
+
   it("resolves guild source delivery from default, explicit, and room-event modes", async () => {
     await runProcessDiscordMessage(
       await createBaseContext({
