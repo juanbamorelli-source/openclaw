@@ -22,6 +22,7 @@ import {
 } from "../channels/plugins/native-approval-prompt.js";
 import type { SubagentDelegationMode } from "../config/types.agent-defaults.js";
 import type { MemoryCitationsMode } from "../config/types.memory.js";
+import { isOpenClawChatPromptSurface } from "../plugins/agent-prompt-surface-kind.js";
 import { buildMemoryPromptSection } from "../plugins/memory-state.js";
 import type { AgentPromptSurfaceKind } from "../plugins/types.js";
 import { listDeliverableMessageChannels } from "../utils/message-channel.js";
@@ -202,11 +203,23 @@ function buildProjectContextSection(params: {
   files: EmbeddedContextFile[];
   heading: string;
   dynamic: boolean;
+  compact?: boolean;
 }) {
   if (params.files.length === 0) {
     return [];
   }
   const lines = [params.heading, ""];
+  if (params.compact) {
+    lines.push(
+      "Compact chat baseline: workspace context files are listed by reference to keep routine channel turns small. Read the exact file before relying on omitted detail.",
+      "",
+    );
+    for (const file of params.files) {
+      lines.push(`- ${file.path}: ${describeCompactContextFile(file.path)}`);
+    }
+    lines.push("");
+    return lines;
+  }
   if (params.dynamic) {
     lines.push(
       "The following frequently-changing project context files are kept below the cache boundary when possible:",
@@ -234,6 +247,26 @@ function buildProjectContextSection(params: {
     lines.push(`## ${file.path}`, "", sanitizeContextFileContentForPrompt(file.content), "");
   }
   return lines;
+}
+
+function describeCompactContextFile(path: string): string {
+  const basename = getContextFileBasename(path);
+  switch (basename) {
+    case "agents.md":
+      return "workspace rules and dispatch guardrails";
+    case "soul.md":
+      return "persona, boundaries, and safety posture";
+    case "user.md":
+      return "durable user and family context";
+    case "tools.md":
+      return "local tool/channel notes";
+    case "memory.md":
+      return "durable memory index and operational anchors";
+    case "identity.md":
+      return "agent identity";
+    default:
+      return "workspace context";
+  }
 }
 
 function buildHeartbeatSection(params: { isMinimal: boolean; heartbeatPrompt?: string }) {
@@ -265,20 +298,44 @@ function buildExecApprovalPromptGuidance(params: {
   return 'If exec returns approval-pending, send the exact /approve command from "Reply with:"; do not ask for another code.';
 }
 
-function buildSkillsSection(params: { skillsPrompt?: string; readToolName: string }) {
+function buildSkillsSection(params: {
+  skillsPrompt?: string;
+  readToolName: string;
+  compact?: boolean;
+}) {
   const trimmed = params.skillsPrompt?.trim();
   if (!trimmed) {
     return [];
   }
-  return [
-    "## Skills",
-    `Scan <available_skills>. If one clearly applies, read its SKILL.md at exact <location> with \`${params.readToolName}\`, then follow it.`,
-    "If several apply, choose the most specific. If none clearly apply, read none.",
-    "One skill up front max. Never guess/fabricate skill paths.",
-    "External API writes: batch when safe, avoid tight loops, respect 429/Retry-After.",
-    trimmed,
-    "",
-  ];
+  const renderedPrompt = params.compact ? compactSkillsPromptForChat(trimmed) : trimmed;
+  const instructions = params.compact
+    ? [
+        "Compact chat baseline: <available_skills> lists skill names only.",
+        "If a skill clearly applies, resolve its exact SKILL.md path with `openclaw skills search <name>` or the skill catalog before reading it.",
+        "Never guess/fabricate skill paths.",
+      ]
+    : [
+        `Scan <available_skills>. If one clearly applies, read its SKILL.md at exact <location> with \`${params.readToolName}\`, then follow it.`,
+        "If several apply, choose the most specific. If none clearly apply, read none.",
+        "One skill up front max. Never guess/fabricate skill paths.",
+        "External API writes: batch when safe, avoid tight loops, respect 429/Retry-After.",
+      ];
+  return ["## Skills", ...instructions, renderedPrompt, ""];
+}
+
+function compactSkillsPromptForChat(skillsPrompt: string): string {
+  const names = Array.from(skillsPrompt.matchAll(/<name>([\s\S]*?)<\/name>/gi))
+    .map((match) => match[1]?.trim())
+    .filter((name): name is string => Boolean(name));
+  if (names.length === 0) {
+    return skillsPrompt;
+  }
+  const lines = [`<available_skills compact="true" count="${names.length}">`];
+  for (const name of names) {
+    lines.push("  <skill>", `    <name>${name}</name>`, "  </skill>");
+  }
+  lines.push("</available_skills>");
+  return lines.join("\n");
 }
 
 function buildMemorySection(params: {
@@ -726,6 +783,7 @@ export function buildAgentSystemPrompt(params: {
 }) {
   const acpEnabled = params.acpEnabled === true;
   const promptSurface = params.promptSurface ?? "openclaw_main";
+  const lightweightChatPrompt = isOpenClawChatPromptSurface(promptSurface);
   const sandboxedRuntime = params.sandboxInfo?.enabled === true;
   const acpSpawnRuntimeEnabled = acpEnabled && !sandboxedRuntime;
   const coreToolSummaries: Record<string, string> = {
@@ -815,7 +873,8 @@ export function buildAgentSystemPrompt(params: {
   const normalizedTools = canonicalToolNames.map((tool) => tool.toLowerCase());
   const availableTools = new Set(normalizedTools);
   const hasSessionsSpawn = availableTools.has("sessions_spawn");
-  const acpHarnessSpawnAllowed = hasSessionsSpawn && acpSpawnRuntimeEnabled;
+  const acpHarnessSpawnAllowed =
+    hasSessionsSpawn && acpSpawnRuntimeEnabled && !lightweightChatPrompt;
   const nativeCommandGuidanceLines = normalizeUniqueStringEntries(
     params.nativeCommandGuidanceLines,
   );
@@ -934,13 +993,14 @@ export function buildAgentSystemPrompt(params: {
   const skillsSection = buildSkillsSection({
     skillsPrompt,
     readToolName,
+    compact: lightweightChatPrompt,
   });
   const skillWorkshopSection = availableTools.has(SKILL_WORKSHOP_TOOL_NAME)
     ? buildSkillWorkshopPromptSection()
     : [];
   const memorySection = buildMemorySection({
     isMinimal,
-    includeMemorySection: params.includeMemorySection,
+    includeMemorySection: lightweightChatPrompt ? false : params.includeMemorySection,
     availableTools,
     citationsMode: params.memoryCitationsMode,
   });
@@ -1093,17 +1153,25 @@ export function buildAgentSystemPrompt(params: {
         fallback: [],
       }),
       ...safetySection,
-      "## OpenClaw Control",
-      "Do not invent commands.",
-      "Config/restart: prefer `gateway` tool (`config.schema.lookup|get|patch|apply`, `restart`).",
-      "CLI lifecycle only on explicit user request: `openclaw gateway status|restart|start|stop`.",
-      "`restart`, not stop+start.",
-      "",
+      ...(lightweightChatPrompt
+        ? [
+            "## OpenClaw Control",
+            "Do not invent commands. Runtime/config/restart/update mutations require explicit user request and the applicable local guardrails.",
+            "",
+          ]
+        : [
+            "## OpenClaw Control",
+            "Do not invent commands.",
+            "Config/restart: prefer `gateway` tool (`config.schema.lookup|get|patch|apply`, `restart`).",
+            "CLI lifecycle only on explicit user request: `openclaw gateway status|restart|start|stop`.",
+            "`restart`, not stop+start.",
+            "",
+          ]),
       ...skillsSection,
       ...skillWorkshopSection,
       ...memorySection,
-      hasGateway && !isMinimal ? "## OpenClaw Self-Update" : "",
-      hasGateway && !isMinimal
+      hasGateway && !isMinimal && !lightweightChatPrompt ? "## OpenClaw Self-Update" : "",
+      hasGateway && !isMinimal && !lightweightChatPrompt
         ? [
             "Only explicit user request.",
             "Before config edits/questions: `config.schema.lookup` for the exact dot path.",
@@ -1111,18 +1179,32 @@ export function buildAgentSystemPrompt(params: {
             "After restart, OpenClaw pings the last active session automatically.",
           ].join("\n")
         : "",
-      hasGateway && !isMinimal ? "" : "",
+      hasGateway && !isMinimal && !lightweightChatPrompt ? "" : "",
       "",
-      params.modelAliasLines && params.modelAliasLines.length > 0 && !isMinimal
+      params.modelAliasLines &&
+      params.modelAliasLines.length > 0 &&
+      !isMinimal &&
+      !lightweightChatPrompt
         ? "## Model Aliases"
         : "",
-      params.modelAliasLines && params.modelAliasLines.length > 0 && !isMinimal
+      params.modelAliasLines &&
+      params.modelAliasLines.length > 0 &&
+      !isMinimal &&
+      !lightweightChatPrompt
         ? "Prefer aliases when specifying model overrides; full provider/model is also accepted."
         : "",
-      params.modelAliasLines && params.modelAliasLines.length > 0 && !isMinimal
+      params.modelAliasLines &&
+      params.modelAliasLines.length > 0 &&
+      !isMinimal &&
+      !lightweightChatPrompt
         ? params.modelAliasLines.join("\n")
         : "",
-      params.modelAliasLines && params.modelAliasLines.length > 0 && !isMinimal ? "" : "",
+      params.modelAliasLines &&
+      params.modelAliasLines.length > 0 &&
+      !isMinimal &&
+      !lightweightChatPrompt
+        ? ""
+        : "",
       userTimezone
         ? "If you need the current date, time, or day of week, run session_status (📊 session_status)."
         : "",
@@ -1216,6 +1298,7 @@ export function buildAgentSystemPrompt(params: {
         files: contextFiles.stable,
         heading: "# Project Context",
         dynamic: false,
+        compact: lightweightChatPrompt,
       }),
     );
 
@@ -1247,6 +1330,7 @@ export function buildAgentSystemPrompt(params: {
       files: contextFiles.dynamic,
       heading: contextFiles.stable.length > 0 ? "# Dynamic Project Context" : "# Project Context",
       dynamic: true,
+      compact: lightweightChatPrompt,
     }),
   );
 

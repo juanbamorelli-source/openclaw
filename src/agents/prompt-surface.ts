@@ -5,7 +5,11 @@
  */
 import { isOpenClawMainPromptSurface } from "../plugins/agent-prompt-surface-kind.js";
 import type { AgentPromptSurfaceKind } from "../plugins/types.js";
-import { isAcpSessionKey, isSubagentSessionKey } from "../routing/session-key.js";
+import {
+  isAcpSessionKey,
+  isSubagentSessionKey,
+  parseAgentSessionKey,
+} from "../routing/session-key.js";
 
 /** Builds fallback tool guidance when a runtime cannot render the structured tool list. */
 export function buildOpenClawToolFallbackText(params: {
@@ -36,6 +40,15 @@ export function buildOpenClawToolFallbackText(params: {
     ].join("\n");
   }
 
+  if (params.surface === "openclaw_chat") {
+    return [
+      "OpenClaw lists the standard tools above. This lightweight chat prompt enables only the tools exposed directly by the active backend.",
+      `Use ${params.execToolName} for local read-only checks when needed; use first-class tools when listed.`,
+      "Use `sessions_spawn` only for clearly bounded delegated work.",
+      "Do not assume hidden tools exist.",
+    ].join("\n");
+  }
+
   return "No OpenClaw tool list is injected for this runtime prompt surface. Use only tools exposed directly by the active backend.";
 }
 
@@ -47,6 +60,11 @@ export function shouldRenderOpenClawToolWorkflowHints(params: {
   return isOpenClawMainPromptSurface(params.surface);
 }
 
+function isDiscordChannelSessionKey(sessionKey?: string): boolean {
+  const rest = parseAgentSessionKey(sessionKey)?.rest;
+  return rest?.startsWith("discord:") === true;
+}
+
 /** Maps a session key to the prompt surface used for tool guidance and runtime behavior. */
 export function resolveAgentPromptSurfaceForSessionKey(
   sessionKey?: string,
@@ -54,5 +72,8 @@ export function resolveAgentPromptSurfaceForSessionKey(
   if (sessionKey && isAcpSessionKey(sessionKey)) {
     return "acp_backend";
   }
-  return sessionKey && isSubagentSessionKey(sessionKey) ? "subagent" : "openclaw_main";
+  if (sessionKey && isSubagentSessionKey(sessionKey)) {
+    return "subagent";
+  }
+  return isDiscordChannelSessionKey(sessionKey) ? "openclaw_chat" : "openclaw_main";
 }

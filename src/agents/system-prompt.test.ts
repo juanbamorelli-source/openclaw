@@ -18,6 +18,9 @@ describe("buildAgentSystemPrompt", () => {
   it("resolves helper session keys to scoped prompt surfaces", () => {
     expect(resolveAgentPromptSurfaceForSessionKey("agent:main:subagent:child")).toBe("subagent");
     expect(resolveAgentPromptSurfaceForSessionKey("agent:codex:acp:child")).toBe("acp_backend");
+    expect(resolveAgentPromptSurfaceForSessionKey("agent:main:discord:channel:123")).toBe(
+      "openclaw_chat",
+    );
     expect(resolveAgentPromptSurfaceForSessionKey("agent:main")).toBe("openclaw_main");
     expect(resolveAgentPromptSurfaceForSessionKey(undefined)).toBe("openclaw_main");
   });
@@ -763,6 +766,56 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("Alpha");
     expect(prompt).toContain("## IDENTITY.md");
     expect(prompt).toContain("Bravo");
+  });
+
+  it("uses compact project context and skills for lightweight chat prompts", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      promptSurface: "openclaw_chat",
+      toolNames: ["exec", "sessions_spawn", "memory_search", "gateway"],
+      skillsPrompt: [
+        "<available_skills>",
+        "  <skill>",
+        "    <name>project-producer</name>",
+        "    <description>Dispatch coding agents and verify work.</description>",
+        "    <location>/skills/project-producer/SKILL.md</location>",
+        "  </skill>",
+        "  <skill>",
+        "    <name>weather</name>",
+        "    <description>Fetch weather.</description>",
+        "    <location>/skills/weather/SKILL.md</location>",
+        "  </skill>",
+        "</available_skills>",
+      ].join("\n"),
+      modelAliasLines: ["default: openai/gpt-5.5"],
+      contextFiles: [
+        { path: "AGENTS.md", content: "Dispatch contract body" },
+        { path: "SOUL.md", content: "Persona body" },
+        { path: "USER.md", content: "Family details body" },
+      ],
+    });
+
+    expect(prompt).toContain(
+      "Compact chat baseline: workspace context files are listed by reference",
+    );
+    expect(prompt).toContain("- AGENTS.md: workspace rules and dispatch guardrails");
+    expect(prompt).toContain("- SOUL.md: persona, boundaries, and safety posture");
+    expect(prompt).toContain("- USER.md: durable user and family context");
+    expect(prompt).not.toContain("Dispatch contract body");
+    expect(prompt).not.toContain("Persona body");
+    expect(prompt).not.toContain("Family details body");
+
+    expect(prompt).toContain('<available_skills compact="true" count="2">');
+    expect(prompt).toContain("<name>project-producer</name>");
+    expect(prompt).toContain("<name>weather</name>");
+    expect(prompt).not.toContain("<description>Dispatch coding agents");
+    expect(prompt).not.toContain("<location>/skills/project-producer/SKILL.md</location>");
+    expect(prompt).toContain("openclaw skills search <name>");
+
+    expect(prompt).not.toContain("## Memory Recall");
+    expect(prompt).not.toContain("## OpenClaw Self-Update");
+    expect(prompt).not.toContain("## Model Aliases");
+    expect(prompt).not.toContain('runtime: "acp"');
   });
 
   it("ignores context files with missing or blank paths", () => {

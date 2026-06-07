@@ -12,3 +12,8 @@ export function normalizeAgentPromptSurfaceKind(
 export function isOpenClawMainPromptSurface(surface: AgentPromptSurfaceKind): boolean {
   return normalizeAgentPromptSurfaceKind(surface) === "openclaw_main";
 }
+
+/** True when a prompt surface targets a lightweight channel-chat prompt. */
+export function isOpenClawChatPromptSurface(surface: AgentPromptSurfaceKind): boolean {
+  return normalizeAgentPromptSurfaceKind(surface) === "openclaw_chat";
+}

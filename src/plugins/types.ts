@@ -2024,6 +2024,7 @@ export type PluginCommandHandler = (
  */
 export const AGENT_PROMPT_SURFACE_KINDS = [
   "openclaw_main",
+  "openclaw_chat",
   /** @deprecated Use openclaw_main. */
   "pi_main",
   "codex_app_server",
