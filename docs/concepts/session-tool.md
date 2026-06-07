@@ -56,8 +56,9 @@ unrelated sessions stay hidden. When visibility is restricted, `sessions_list`
 returns optional `visibility` metadata showing the effective mode and a warning that
 results may be scope-limited.
 
-`sessions_history` fetches the conversation transcript for a specific session.
-By default, tool results are excluded -- pass `includeTools: true` to see them.
+`sessions_history` fetches the last 10 conversation turns for a specific
+session. Use it only for reset/recovery cases where required context is missing.
+Tool results are always excluded from this model-facing recall path.
 The returned view is intentionally bounded and safety-filtered:
 
 - assistant text is normalized before recall:
@@ -79,6 +80,9 @@ The returned view is intentionally bounded and safety-filtered:
   `[sessions_history omitted: message too large]`
 - the tool reports summary flags such as `truncated`, `droppedMessages`,
   `contentTruncated`, `contentRedacted`, and `bytes`
+
+Callers can pass a smaller `limit` when less context is sufficient. Avoid using
+`sessions_history` for routine context refreshes in long-lived chat sessions.
 
 Both tools accept either a **session key** (like `"main"`) or a **session ID**
 from a previous list call.
@@ -121,9 +125,13 @@ the caller's current session; visible client labels such as `openclaw-tui` are
 not session keys.
 
 When route metadata is available, `session_status` also includes a visible
-`Route context` JSON block and matching structured `details` fields. These
-fields disambiguate the session key from the route that is currently handling
-the live run:
+`Route context` JSON block. By default, structured tool-result `details` stay
+compact and report route-presence metadata rather than duplicating the full
+status card. Set `tools.sessionStatus.details="full"` for explicit debugging
+when the legacy `details.statusText` and full route fields are required.
+
+Route context disambiguates the session key from the route that is currently
+handling the live run:
 
 - `origin` is where the session was created, or the provider inferred from a
   deliverable session-key prefix when older state lacks stored origin metadata.
