@@ -376,6 +376,16 @@ Default: `tree` (current session + sessions spawned by it, such as subagents).
     sessions: {
       // "self" | "tree" | "agent" | "all"
       visibility: "tree",
+      history: {
+        // Max JSON bytes returned by sessions_history when includeTools=true.
+        includeToolsMaxBytes: 24576,
+        // Max text chars retained per toolResult message when includeTools=true.
+        toolResultMaxChars: 1200,
+      },
+    },
+    sessionStatus: {
+      // "compact" keeps model-facing details small; "full" restores legacy detail payloads.
+      details: "compact",
     },
   },
 }
@@ -394,6 +404,40 @@ Default: `tree` (current session + sessions spawned by it, such as subagents).
 
   </Accordion>
 </AccordionGroup>
+
+#### `tools.sessions.history`
+
+`sessions_history` excludes tool results by default. When a caller explicitly
+sets `includeTools: true`, OpenClaw keeps the response bounded with a stricter
+tool-inclusive byte cap and per-tool-result text cap.
+
+- `includeToolsMaxBytes`: maximum serialized JSON bytes returned by
+  `sessions_history` when `includeTools=true`. Default: `24576`.
+- `toolResultMaxChars`: maximum text characters retained per `toolResult`
+  message when `includeTools=true`. Default: `1200`.
+
+Use these as escape hatches for trusted debugging sessions. Avoid setting them
+high for long-lived chat channels because tool-inclusive history can otherwise
+replay large prior tool outputs into the same session context.
+
+### `tools.sessionStatus`
+
+Controls model-facing details returned by the `session_status` tool.
+
+```json5
+{
+  tools: {
+    sessionStatus: {
+      details: "compact", // "compact" | "full"
+    },
+  },
+}
+```
+
+- `compact` (default): keeps full human-readable status text in tool `content`
+  while returning compact metadata in structured `details`.
+- `full`: preserves legacy `details.statusText` and route metadata for explicit
+  debugging.
 
 ### `tools.sessions_spawn`
 

@@ -244,6 +244,7 @@ export type CodeModeConfig =
     };
 
 export type SessionsToolsVisibility = "self" | "tree" | "agent" | "all";
+export type SessionStatusDetailsMode = "compact" | "full";
 
 export type ToolPolicyConfig = {
   /** Exact tool names allowed after the selected profile is applied. */
@@ -708,6 +709,18 @@ export type ToolsConfig = {
      * - "all": any session (cross-agent still requires tools.agentToAgent)
      */
     visibility?: SessionsToolsVisibility;
+    /** sessions_history output caps. Defaults keep model-facing recall compact. */
+    history?: {
+      /** Maximum JSON bytes returned when sessions_history is called with includeTools=true. */
+      includeToolsMaxBytes?: number;
+      /** Maximum text chars retained per toolResult message when includeTools=true. */
+      toolResultMaxChars?: number;
+    };
+  };
+  /** session_status tool output policy. */
+  sessionStatus?: {
+    /** Compact keeps details small; full preserves legacy details.statusText and route metadata. */
+    details?: SessionStatusDetailsMode;
   };
   /** Elevated exec permissions for the host machine. */
   elevated?: {

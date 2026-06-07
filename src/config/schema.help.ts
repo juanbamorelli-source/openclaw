@@ -763,6 +763,12 @@ export const FIELD_HELP: Record<string, string> = {
     "Global tool profile name used to select a predefined tool policy baseline before applying allow/deny overrides. Use this for consistent environment posture across agents and keep profile names stable.",
   "tools.alsoAllow":
     "Extra tool allowlist entries merged on top of the selected tool profile and default policy. Keep this list small and explicit so audits can quickly identify intentional policy exceptions.",
+  "tools.sessions.history.includeToolsMaxBytes":
+    "Maximum JSON bytes returned by sessions_history when includeTools=true. Keep this compact to prevent tool-result replay from bloating long-lived chat sessions.",
+  "tools.sessions.history.toolResultMaxChars":
+    "Maximum text characters retained per toolResult message returned by sessions_history when includeTools=true.",
+  "tools.sessionStatus.details":
+    'Controls session_status structured details. "compact" keeps model-facing tool results small; "full" preserves legacy statusText and route metadata for explicit debugging.',
   "tools.byProvider":
     "Per-provider tool allow/deny overrides keyed by channel/provider ID to tailor capabilities by surface. Use this when one provider needs stricter controls than global tool policy.",
   "agents.list[].tools.profile":

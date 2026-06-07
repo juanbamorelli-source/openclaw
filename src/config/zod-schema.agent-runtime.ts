@@ -1104,6 +1104,24 @@ export const ToolsSchema = z
     sessions: z
       .object({
         visibility: z.enum(["self", "tree", "agent", "all"]).optional(),
+        history: z
+          .object({
+            includeToolsMaxBytes: z
+              .number()
+              .int()
+              .min(1024)
+              .max(1024 * 1024)
+              .optional(),
+            toolResultMaxChars: z.number().int().min(100).max(50_000).optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
+    sessionStatus: z
+      .object({
+        details: z.enum(["compact", "full"]).optional(),
       })
       .strict()
       .optional(),

@@ -36,7 +36,13 @@ const SessionsHistoryToolSchema = Type.Object({
 });
 
 const SESSIONS_HISTORY_MAX_BYTES = 80 * 1024;
+const SESSIONS_HISTORY_WITH_TOOLS_MAX_BYTES = 24 * 1024;
 const SESSIONS_HISTORY_TEXT_MAX_CHARS = 4000;
+const SESSIONS_HISTORY_TOOL_TEXT_MAX_CHARS = 1200;
+const SESSIONS_HISTORY_WITH_TOOLS_MIN_BYTES = 1024;
+const SESSIONS_HISTORY_WITH_TOOLS_MAX_CONFIG_BYTES = 1024 * 1024;
+const SESSIONS_HISTORY_TOOL_TEXT_MIN_CHARS = 100;
+const SESSIONS_HISTORY_TOOL_TEXT_MAX_CONFIG_CHARS = 50_000;
 type GatewayCaller = typeof callGateway;
 
 // sandbox policy handling is shared with sessions-list-tool via sessions-helpers.ts
@@ -55,6 +61,39 @@ function truncateHistoryText(text: string): {
   }
   const cut = truncateUtf16Safe(sanitized, SESSIONS_HISTORY_TEXT_MAX_CHARS);
   return { text: `${cut}\n…(truncated)…`, truncated: true, redacted };
+}
+
+function readBoundedPositiveInteger(
+  value: unknown,
+  params: {
+    fallback: number;
+    min: number;
+    max: number;
+  },
+): number {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    return params.fallback;
+  }
+  return Math.min(params.max, Math.max(params.min, value));
+}
+
+function resolveSessionsHistoryLimits(cfg: OpenClawConfig): {
+  includeToolsMaxBytes: number;
+  toolResultMaxChars: number;
+} {
+  const historyCfg = cfg.tools?.sessions?.history;
+  return {
+    includeToolsMaxBytes: readBoundedPositiveInteger(historyCfg?.includeToolsMaxBytes, {
+      fallback: SESSIONS_HISTORY_WITH_TOOLS_MAX_BYTES,
+      min: SESSIONS_HISTORY_WITH_TOOLS_MIN_BYTES,
+      max: SESSIONS_HISTORY_WITH_TOOLS_MAX_CONFIG_BYTES,
+    }),
+    toolResultMaxChars: readBoundedPositiveInteger(historyCfg?.toolResultMaxChars, {
+      fallback: SESSIONS_HISTORY_TOOL_TEXT_MAX_CHARS,
+      min: SESSIONS_HISTORY_TOOL_TEXT_MIN_CHARS,
+      max: SESSIONS_HISTORY_TOOL_TEXT_MAX_CONFIG_CHARS,
+    }),
+  };
 }
 
 function sanitizeHistoryContentBlock(block: unknown): {
@@ -158,6 +197,117 @@ function sanitizeHistoryMessage(message: unknown): {
   return { message: entry, truncated, redacted };
 }
 
+function readHistoryMessageRole(message: Record<string, unknown>): string {
+  return typeof message.role === "string" ? message.role.toLowerCase() : "";
+}
+
+function truncateToolHistoryText(
+  text: string,
+  maxChars: number = SESSIONS_HISTORY_TOOL_TEXT_MAX_CHARS,
+): {
+  text: string;
+  truncated: boolean;
+  redacted: boolean;
+} {
+  const sanitized = redactToolPayloadText(text);
+  const redacted = sanitized !== text;
+  if (sanitized.length <= maxChars) {
+    return { text: sanitized, truncated: false, redacted };
+  }
+  const cut = truncateUtf16Safe(sanitized, maxChars);
+  return { text: `${cut}\n…(tool result summarized)…`, truncated: true, redacted };
+}
+
+function summarizeToolHistoryContentBlock(
+  block: unknown,
+  params: { toolResultMaxChars: number },
+): {
+  block: unknown;
+  truncated: boolean;
+  redacted: boolean;
+} {
+  if (!block || typeof block !== "object") {
+    return { block, truncated: false, redacted: false };
+  }
+  const entry = { ...(block as Record<string, unknown>) };
+  let truncated = false;
+  let redacted = false;
+  if (typeof entry.text === "string") {
+    const res = truncateToolHistoryText(entry.text, params.toolResultMaxChars);
+    entry.text = res.text;
+    truncated ||= res.truncated;
+    redacted ||= res.redacted;
+  }
+  if (typeof entry.content === "string") {
+    const res = truncateToolHistoryText(entry.content, params.toolResultMaxChars);
+    entry.content = res.text;
+    truncated ||= res.truncated;
+    redacted ||= res.redacted;
+  }
+  return { block: entry, truncated, redacted };
+}
+
+function summarizeToolHistoryMessage(
+  message: unknown,
+  params: { toolResultMaxChars: number },
+): {
+  message: unknown;
+  truncated: boolean;
+  redacted: boolean;
+} {
+  if (!message || typeof message !== "object") {
+    return { message, truncated: false, redacted: false };
+  }
+  const entry = { ...(message as Record<string, unknown>) };
+  if (readHistoryMessageRole(entry) !== "toolresult") {
+    return sanitizeHistoryMessage(entry);
+  }
+
+  let truncated = false;
+  let redacted = false;
+  if ("details" in entry) {
+    delete entry.details;
+    truncated = true;
+  }
+  if ("usage" in entry) {
+    delete entry.usage;
+    truncated = true;
+  }
+  if ("cost" in entry) {
+    delete entry.cost;
+    truncated = true;
+  }
+
+  const originalChars =
+    (typeof entry.content === "string" ? entry.content.length : 0) +
+    (typeof entry.text === "string" ? entry.text.length : 0);
+  if (typeof entry.content === "string") {
+    const res = truncateToolHistoryText(entry.content, params.toolResultMaxChars);
+    entry.content = res.text;
+    truncated ||= res.truncated;
+    redacted ||= res.redacted;
+  } else if (Array.isArray(entry.content)) {
+    const updated = entry.content.map((block) => summarizeToolHistoryContentBlock(block, params));
+    entry.content = updated.map((item) => item.block);
+    truncated ||= updated.some((item) => item.truncated);
+    redacted ||= updated.some((item) => item.redacted);
+  }
+  if (typeof entry.text === "string") {
+    const res = truncateToolHistoryText(entry.text, params.toolResultMaxChars);
+    entry.text = res.text;
+    truncated ||= res.truncated;
+    redacted ||= res.redacted;
+  }
+  if (truncated) {
+    entry.toolResultSummary = {
+      summarized: true,
+      originalChars,
+      retainedMaxChars: params.toolResultMaxChars,
+    };
+  }
+  return { message: entry, truncated, redacted };
+}
+
 function enforceSessionsHistoryHardCap(params: {
   items: unknown[];
   bytes: number;
@@ -255,24 +405,34 @@ export function createSessionsHistoryTool(opts?: {
 
       const limit = readPositiveIntegerParam(params, "limit");
       const includeTools = Boolean(params.includeTools);
+      const historyLimits = resolveSessionsHistoryLimits(cfg);
       const result = await gatewayCall<{ messages: Array<unknown> }>({
         method: "chat.history",
         params: { sessionKey: resolvedKey, limit },
       });
       const rawMessages = Array.isArray(result?.messages) ? result.messages : [];
       const selectedMessages = includeTools ? rawMessages : stripToolMessages(rawMessages);
-      const sanitizedMessages = selectedMessages.map((message) => sanitizeHistoryMessage(message));
+      const sanitizedMessages = selectedMessages.map((message) =>
+        includeTools
+          ? summarizeToolHistoryMessage(message, {
+              toolResultMaxChars: historyLimits.toolResultMaxChars,
+            })
+          : sanitizeHistoryMessage(message),
+      );
       const contentTruncated = sanitizedMessages.some((entry) => entry.truncated);
       const contentRedacted = sanitizedMessages.some((entry) => entry.redacted);
+      const maxBytes = includeTools
+        ? historyLimits.includeToolsMaxBytes
+        : SESSIONS_HISTORY_MAX_BYTES;
       const cappedMessages = capArrayByJsonBytes(
         sanitizedMessages.map((entry) => entry.message),
-        SESSIONS_HISTORY_MAX_BYTES,
+        maxBytes,
       );
       const droppedMessages = cappedMessages.items.length < selectedMessages.length;
       const hardened = enforceSessionsHistoryHardCap({
         items: cappedMessages.items,
         bytes: cappedMessages.bytes,
-        maxBytes: SESSIONS_HISTORY_MAX_BYTES,
+        maxBytes,
       });
       return jsonResult({
         sessionKey: displayKey,

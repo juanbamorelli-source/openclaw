@@ -51,6 +51,51 @@ describe("config: tools.alsoAllow", () => {
     expect(res.ok).toBe(true);
   });
 
+  it("allows sessions_history and session_status output policy config", () => {
+    const res = validateConfigObject({
+      tools: {
+        sessions: {
+          history: {
+            includeToolsMaxBytes: 4096,
+            toolResultMaxChars: 256,
+          },
+        },
+        sessionStatus: {
+          details: "compact",
+        },
+      },
+    });
+
+    expect(res.ok).toBe(true);
+  });
+
+  it("rejects invalid sessions_history and session_status output policy config", () => {
+    const res = validateConfigObject({
+      tools: {
+        sessions: {
+          history: {
+            includeToolsMaxBytes: 10,
+            toolResultMaxChars: 10,
+          },
+        },
+        sessionStatus: {
+          details: "verbose",
+        },
+      },
+    });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.issues.map((issue) => issue.path)).toEqual(
+        expect.arrayContaining([
+          "tools.sessions.history.includeToolsMaxBytes",
+          "tools.sessions.history.toolResultMaxChars",
+          "tools.sessionStatus.details",
+        ]),
+      );
+    }
+  });
+
   it("allows per-agent message tool cross-context policy", () => {
     const res = validateConfigObject({
       agents: {

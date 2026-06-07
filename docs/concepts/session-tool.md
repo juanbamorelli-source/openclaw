@@ -75,10 +75,19 @@ The returned view is intentionally bounded and safety-filtered:
     `</minimax:tool_call>` is stripped
 - credential/token-like text is redacted before it is returned
 - long text blocks are truncated
+- when `includeTools: true` is used, `toolResult` messages are summarized before
+  recall; `details`, `usage`, and `cost` are omitted and a compact
+  `toolResultSummary` marker reports the retained maximum
 - very large histories can drop older rows or replace an oversized row with
   `[sessions_history omitted: message too large]`
 - the tool reports summary flags such as `truncated`, `droppedMessages`,
   `contentTruncated`, `contentRedacted`, and `bytes`
+
+The default `includeTools: true` caps are intentionally smaller than normal
+history recall so a long-lived chat session does not replay large prior tool
+outputs into itself. Operators can tune the escape hatches with
+`tools.sessions.history.includeToolsMaxBytes` and
+`tools.sessions.history.toolResultMaxChars`.
 
 Both tools accept either a **session key** (like `"main"`) or a **session ID**
 from a previous list call.
@@ -121,9 +130,13 @@ the caller's current session; visible client labels such as `openclaw-tui` are
 not session keys.
 
 When route metadata is available, `session_status` also includes a visible
-`Route context` JSON block and matching structured `details` fields. These
-fields disambiguate the session key from the route that is currently handling
-the live run:
+`Route context` JSON block. By default, structured tool-result `details` stay
+compact and report route-presence metadata rather than duplicating the full
+status card. Set `tools.sessionStatus.details="full"` for explicit debugging
+when the legacy `details.statusText` and full route fields are required.
+
+Route context disambiguates the session key from the route that is currently
+handling the live run:
 
 - `origin` is where the session was created, or the provider inferred from a
   deliverable session-key prefix when older state lacks stored origin metadata.

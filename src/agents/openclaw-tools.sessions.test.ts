@@ -760,6 +760,113 @@ describe("sessions tools", () => {
     );
   });
 
+  it("sessions_history summarizes tool result payloads before returning includeTools history", async () => {
+    callGatewayMock.mockImplementation(async (opts: unknown) => {
+      const request = opts as { method?: string };
+      if (request.method === "chat.history") {
+        return {
+          messages: [
+            {
+              role: "toolResult",
+              content: "tool-output: " + "x".repeat(12_000),
+              details: {
+                raw: "y".repeat(20_000),
+              },
+            },
+          ],
+        };
+      }
+      return {};
+    });
+
+    const tool = createOpenClawTools().find((candidate) => candidate.name === "sessions_history");
+    if (!tool) {
+      throw new Error("missing sessions_history tool");
+    }
+
+    const result = await tool.execute("call-tool-summary", {
+      sessionKey: "main",
+      includeTools: true,
+    });
+    const details = result.details as {
+      messages?: Array<Record<string, unknown>>;
+      contentTruncated?: boolean;
+      bytes?: number;
+    };
+    const message = details.messages?.[0] as
+      | { content?: string; details?: unknown; toolResultSummary?: Record<string, unknown> }
+      | undefined;
+    expect(details.contentTruncated).toBe(true);
+    expect((details.bytes ?? 0) <= 24 * 1024).toBe(true);
+    expect(message?.details).toBeUndefined();
+    expect(message?.content).toContain("tool-output:");
+    expect(message?.content).toContain("(tool result summarized)");
+    expect(message?.content).not.toContain("x".repeat(4000));
+    expect(message?.toolResultSummary).toEqual(
+      expect.objectContaining({
+        summarized: true,
+        retainedMaxChars: 1200,
+      }),
+    );
+  });
+
+  it("sessions_history honors configured includeTools caps", async () => {
+    callGatewayMock.mockImplementation(async (opts: unknown) => {
+      const request = opts as { method?: string };
+      if (request.method === "chat.history") {
+        return {
+          messages: [
+            {
+              role: "toolResult",
+              content: "tool-output: " + "x".repeat(12_000),
+            },
+          ],
+        };
+      }
+      return {};
+    });
+
+    const tool = createOpenClawTools({
+      config: {
+        ...TEST_CONFIG,
+        tools: {
+          ...TEST_CONFIG.tools,
+          sessions: {
+            visibility: "all",
+            history: {
+              includeToolsMaxBytes: 4096,
+              toolResultMaxChars: 256,
+            },
+          },
+        },
+      },
+    }).find((candidate) => candidate.name === "sessions_history");
+    if (!tool) {
+      throw new Error("missing sessions_history tool");
+    }
+
+    const result = await tool.execute("call-tool-config-summary", {
+      sessionKey: "main",
+      includeTools: true,
+    });
+    const details = result.details as {
+      messages?: Array<Record<string, unknown>>;
+      bytes?: number;
+    };
+    const message = details.messages?.[0] as
+      | { content?: string; toolResultSummary?: Record<string, unknown> }
+      | undefined;
+
+    expect((details.bytes ?? 0) <= 4096).toBe(true);
+    expect(message?.content).toContain("(tool result summarized)");
+    expect(message?.toolResultSummary).toEqual(
+      expect.objectContaining({
+        summarized: true,
+        retainedMaxChars: 256,
+      }),
+    );
+  });
+
   it("sessions_history caps oversized payloads and strips heavy fields", async () => {
     const oversized = Array.from({ length: 80 }, (_, idx) => ({
       role: "assistant",
@@ -819,7 +926,7 @@ describe("sessions tools", () => {
     expect(details.contentTruncated).toBe(true);
     expect(details.contentRedacted).toBe(false);
     expect(typeof details.bytes).toBe("number");
-    expect((details.bytes ?? 0) <= 80 * 1024).toBe(true);
+    expect((details.bytes ?? 0) <= 24 * 1024).toBe(true);
     expect(details.messages && details.messages.length > 0).toBe(true);
 
     const first = details.messages?.[0] as
@@ -884,7 +991,7 @@ describe("sessions tools", () => {
     expect(details.contentTruncated).toBe(false);
     expect(details.contentRedacted).toBe(false);
     expect(typeof details.bytes).toBe("number");
-    expect((details.bytes ?? 0) <= 80 * 1024).toBe(true);
+    expect((details.bytes ?? 0) <= 24 * 1024).toBe(true);
     expect(details.messages).toHaveLength(1);
     expect(details.messages?.[0]?.content).toContain(
       "[sessions_history omitted: message too large]",
