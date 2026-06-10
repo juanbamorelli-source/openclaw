@@ -240,6 +240,54 @@ describe("codex conversation binding", () => {
     ).resolves.not.toContain('"modelProvider": "openai"');
   });
 
+  it("normalizes legacy openai-codex auth when rebinding native threads", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    agentRuntimeMocks.ensureAuthProfileStore.mockReturnValue({
+      version: 1,
+      profiles: {
+        "openai:default": {
+          type: "oauth",
+          provider: "openai",
+          access: "access-token",
+        },
+      },
+    });
+    await fs.writeFile(
+      `${sessionFile}.codex-app-server.json`,
+      JSON.stringify({
+        schemaVersion: 1,
+        threadId: "thread-old",
+        cwd: tempDir,
+        authProfileId: "openai-codex:default",
+        modelProvider: "openai",
+      }),
+    );
+    sharedClientMocks.getSharedCodexAppServerClient.mockResolvedValue({
+      request: vi.fn(async () => ({
+        thread: { id: "thread-new", sessionId: "session-1", cwd: tempDir },
+        model: "gpt-5.4-mini",
+        modelProvider: "openai",
+      })),
+    });
+
+    await startCodexConversationThread({
+      sessionFile,
+      workspaceDir: tempDir,
+      model: "gpt-5.4-mini",
+      modelProvider: "openai",
+    });
+
+    const sharedClientParams = mockCallArg(sharedClientMocks.getSharedCodexAppServerClient) as {
+      authProfileId?: unknown;
+    };
+    expect(sharedClientParams?.authProfileId).toBe("openai:default");
+    const savedBinding = JSON.parse(
+      await fs.readFile(`${sessionFile}.codex-app-server.json`, "utf8"),
+    );
+    expect(savedBinding.authProfileId).toBe("openai:default");
+    expect(savedBinding).not.toHaveProperty("modelProvider");
+  });
+
   it("stores and uses the owning agent dir for bound app-server sessions", async () => {
     const sessionFile = path.join(tempDir, "session.jsonl");
     const agentDir = path.join(tempDir, "agents", "bot-a", "agent");
@@ -614,6 +662,100 @@ describe("codex conversation binding", () => {
       },
     });
     expect(resumeCodexCliSessionOnNode).not.toHaveBeenCalled();
+  });
+
+  it("normalizes legacy openai-codex auth before running bound native turns", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    agentRuntimeMocks.ensureAuthProfileStore.mockReturnValue({
+      version: 1,
+      profiles: {
+        "openai:default": {
+          type: "oauth",
+          provider: "openai",
+          access: "access-token",
+        },
+      },
+    });
+    await fs.writeFile(
+      `${sessionFile}.codex-app-server.json`,
+      JSON.stringify({
+        schemaVersion: 1,
+        threadId: "thread-old",
+        cwd: tempDir,
+        authProfileId: "openai-codex:default",
+        model: "gpt-5.4-mini",
+        modelProvider: "openai",
+      }),
+    );
+    const notificationHandlers: Array<(notification: Record<string, unknown>) => void> = [];
+    sharedClientMocks.getSharedCodexAppServerClient.mockResolvedValue({
+      request: vi.fn(async (method: string, requestParams: Record<string, unknown>) => {
+        expect(method).toBe("turn/start");
+        expect(requestParams.threadId).toBe("thread-old");
+        setImmediate(() => {
+          for (const handler of notificationHandlers) {
+            handler({
+              method: "turn/completed",
+              params: {
+                threadId: "thread-old",
+                turn: {
+                  id: "turn-1",
+                  status: "completed",
+                  items: [
+                    {
+                      id: "assistant-1",
+                      type: "agentMessage",
+                      text: "OK",
+                    },
+                  ],
+                },
+              },
+            });
+          }
+        });
+        return { turn: { id: "turn-1" } };
+      }),
+      addNotificationHandler: vi.fn((handler) => {
+        notificationHandlers.push(handler);
+        return () => undefined;
+      }),
+      addRequestHandler: vi.fn(() => () => undefined),
+    });
+
+    const result = await handleCodexConversationInboundClaim(
+      {
+        content: "status",
+        bodyForAgent: "status",
+        channel: "discord",
+        isGroup: true,
+        commandAuthorized: true,
+      },
+      {
+        channelId: "discord",
+        pluginBinding: {
+          bindingId: "binding-1",
+          pluginId: "codex",
+          pluginRoot: tempDir,
+          channel: "discord",
+          accountId: "default",
+          conversationId: "channel-1",
+          boundAt: Date.now(),
+          data: {
+            kind: "codex-app-server-session",
+            version: 1,
+            sessionFile,
+            workspaceDir: tempDir,
+          },
+        },
+      },
+      { timeoutMs: 500 },
+    );
+
+    expect(result).toEqual({ handled: true, reply: { text: "OK" } });
+    const sharedClientParams = mockCallArg(sharedClientMocks.getSharedCodexAppServerClient) as {
+      authProfileId?: unknown;
+    };
+    expect(sharedClientParams?.authProfileId).toBe("openai:default");
   });
 
   it("recreates a missing bound thread and preserves auth plus turn overrides", async () => {

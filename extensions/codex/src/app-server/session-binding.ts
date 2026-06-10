@@ -21,6 +21,8 @@ import type { CodexServiceTier } from "./protocol.js";
 
 const CODEX_APP_SERVER_NATIVE_AUTH_PROVIDER = "openai";
 const PUBLIC_OPENAI_MODEL_PROVIDER = "openai";
+const LEGACY_OPENAI_CODEX_AUTH_PROFILE_PREFIX = "openai-codex:";
+const OPENAI_AUTH_PROFILE_PREFIX = "openai:";
 
 type ProviderAuthAliasLookupParams = Parameters<typeof resolveProviderIdForAuth>[1];
 type ProviderAuthAliasConfig = NonNullable<ProviderAuthAliasLookupParams>["config"];
@@ -102,7 +104,9 @@ export async function readCodexAppServerBinding(
       return undefined;
     }
     const authProfileId =
-      typeof parsed.authProfileId === "string" ? parsed.authProfileId : undefined;
+      typeof parsed.authProfileId === "string"
+        ? normalizeLegacyCodexAppServerAuthProfileId(parsed.authProfileId)
+        : undefined;
     return {
       schemaVersion: 1,
       threadId: parsed.threadId,
@@ -175,7 +179,7 @@ export async function writeCodexAppServerBinding(
     sessionFile,
     threadId: binding.threadId,
     cwd: binding.cwd,
-    authProfileId: binding.authProfileId,
+    authProfileId: normalizeLegacyCodexAppServerAuthProfileId(binding.authProfileId),
     model: binding.model,
     modelProvider: normalizeCodexAppServerBindingModelProvider({
       ...lookup,
@@ -202,6 +206,21 @@ export async function writeCodexAppServerBinding(
     resolveCodexAppServerBindingPath(sessionFile),
     `${JSON.stringify(payload, null, 2)}\n`,
   );
+}
+
+export function normalizeLegacyCodexAppServerAuthProfileId(
+  authProfileId?: string,
+): string | undefined {
+  const trimmed = authProfileId?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  if (trimmed.startsWith(LEGACY_OPENAI_CODEX_AUTH_PROFILE_PREFIX)) {
+    return `${OPENAI_AUTH_PROFILE_PREFIX}${trimmed.slice(
+      LEGACY_OPENAI_CODEX_AUTH_PROFILE_PREFIX.length,
+    )}`;
+  }
+  return trimmed;
 }
 
 function readContextEngineBinding(value: unknown): CodexAppServerContextEngineBinding | undefined {

@@ -25,6 +25,7 @@ import type {
   CodexGetAccountResponse,
   CodexLoginAccountParams,
 } from "./protocol.js";
+import { normalizeLegacyCodexAppServerAuthProfileId } from "./session-binding.js";
 import { resolveCodexAppServerSpawnEnv } from "./transport-stdio.js";
 
 const CODEX_APP_SERVER_AUTH_PROVIDER = "openai";
@@ -90,7 +91,7 @@ export function resolveCodexAppServerAuthProfileId(params: {
   store: ReturnType<typeof ensureAuthProfileStore>;
   config?: AuthProfileOrderConfig;
 }): string | undefined {
-  const requested = params.authProfileId?.trim();
+  const requested = normalizeLegacyCodexAppServerAuthProfileId(params.authProfileId);
   if (requested) {
     return requested;
   }
