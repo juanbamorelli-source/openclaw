@@ -45,7 +45,32 @@ describe("Codex app-server startup binding", () => {
     );
   }
 
-  it("does not use a default byte limit when maxActiveTranscriptBytes is unset", async () => {
+  it("uses a default byte limit for native rollout reuse", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const agentDir = path.join(tempDir, "agent");
+    await writeExistingBinding(sessionFile, workspaceDir, { dynamicToolsFingerprint: "[]" });
+    await writeSessionRecord(sessionFile, { totalTokens: 12_000 });
+    const rolloutDir = path.join(agentDir, "codex-home", "sessions");
+    await fs.mkdir(rolloutDir, { recursive: true });
+    await fs.writeFile(
+      path.join(rolloutDir, "rollout-thread-existing.jsonl"),
+      "x".repeat(2_000_000),
+    );
+
+    const binding = await rotateOversizedCodexAppServerStartupBinding({
+      binding: await readCodexAppServerBinding(sessionFile),
+      sessionFile,
+      agentDir,
+      config: undefined,
+    });
+
+    expect(binding).toBeUndefined();
+    const savedBinding = await readCodexAppServerBinding(sessionFile);
+    expect(savedBinding).toBeUndefined();
+  });
+
+  it("allows native rollout byte rotation to be disabled explicitly", async () => {
     const sessionFile = path.join(tempDir, "session.jsonl");
     const workspaceDir = path.join(tempDir, "workspace");
     const agentDir = path.join(tempDir, "agent");
@@ -66,7 +91,7 @@ describe("Codex app-server startup binding", () => {
         agents: {
           defaults: {
             compaction: {
-              truncateAfterCompaction: true,
+              maxActiveTranscriptBytes: 0,
             },
           },
         },
@@ -76,6 +101,37 @@ describe("Codex app-server startup binding", () => {
     expect(binding?.threadId).toBe("thread-existing");
     const savedBinding = await readCodexAppServerBinding(sessionFile);
     expect(savedBinding?.threadId).toBe("thread-existing");
+  });
+
+  it("caps native rollout byte reuse even when local transcript compaction allows larger files", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const agentDir = path.join(tempDir, "agent");
+    await writeExistingBinding(sessionFile, workspaceDir, { dynamicToolsFingerprint: "[]" });
+    await writeSessionRecord(sessionFile, { totalTokens: 12_000 });
+    const rolloutDir = path.join(agentDir, "codex-home", "sessions");
+    await fs.mkdir(rolloutDir, { recursive: true });
+    await fs.writeFile(path.join(rolloutDir, "rollout-thread-existing.jsonl"), "x".repeat(530_000));
+
+    const binding = await rotateOversizedCodexAppServerStartupBinding({
+      binding: await readCodexAppServerBinding(sessionFile),
+      sessionFile,
+      agentDir,
+      config: {
+        agents: {
+          defaults: {
+            compaction: {
+              truncateAfterCompaction: true,
+              maxActiveTranscriptBytes: "4mb",
+            },
+          },
+        },
+      } as never,
+    });
+
+    expect(binding).toBeUndefined();
+    const savedBinding = await readCodexAppServerBinding(sessionFile);
+    expect(savedBinding).toBeUndefined();
   });
 
   it("reuses the session record cache while sessions.json is unchanged", async () => {

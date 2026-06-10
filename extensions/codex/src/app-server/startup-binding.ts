@@ -19,6 +19,7 @@ const CODEX_APP_SERVER_NATIVE_THREAD_FALLBACK_MAX_TOKENS = 300_000;
 const CODEX_APP_SERVER_NATIVE_THREAD_DEFAULT_RESERVE_TOKENS = 20_000;
 const CODEX_APP_SERVER_NATIVE_THREAD_MIN_PROMPT_BUDGET_TOKENS = 8_000;
 const CODEX_APP_SERVER_NATIVE_THREAD_MIN_PROMPT_BUDGET_RATIO = 0.5;
+const CODEX_APP_SERVER_NATIVE_THREAD_DEFAULT_MAX_BYTES = 512 * 1024;
 const CODEX_APP_SERVER_BYTE_UNITS: Record<string, number> = {
   b: 1,
   k: 1024,
@@ -64,6 +65,20 @@ function parseCodexAppServerByteLimit(value: unknown): number | undefined {
     return undefined;
   }
   return Math.max(1, Math.round(amount * multiplier));
+}
+
+function resolveCodexAppServerNativeThreadMaxBytes(
+  config: EmbeddedRunAttemptParams["config"] | undefined,
+): number | undefined {
+  const configured = readCompactionConfig(config)?.maxActiveTranscriptBytes;
+  if (configured === 0 || configured === "0") {
+    return undefined;
+  }
+  const configuredMaxBytes = parseCodexAppServerByteLimit(configured);
+  return Math.min(
+    configuredMaxBytes ?? CODEX_APP_SERVER_NATIVE_THREAD_DEFAULT_MAX_BYTES,
+    CODEX_APP_SERVER_NATIVE_THREAD_DEFAULT_MAX_BYTES,
+  );
 }
 
 async function listCodexAppServerRolloutFilesForThread(
@@ -346,25 +361,21 @@ export async function rotateOversizedCodexAppServerStartupBinding(params: {
   );
   const compaction = readCompactionConfig(params.config);
   const shouldDeferByteGuard =
-    compaction?.truncateAfterCompaction === true &&
-    params.contextEngineActive === true &&
-    hasContextEngineThreadBootstrapProjection(binding);
-  if (compaction?.truncateAfterCompaction === true && !shouldDeferByteGuard) {
-    const maxBytes = parseCodexAppServerByteLimit(compaction.maxActiveTranscriptBytes);
-    if (maxBytes !== undefined) {
-      const oversizedFiles = rolloutFiles.filter((file) => file.bytes >= maxBytes);
-      if (oversizedFiles.length > 0) {
-        embeddedAgentLog.warn(
-          "codex app-server native transcript exceeded active byte limit; starting a fresh thread",
-          {
-            threadId: binding.threadId,
-            maxBytes,
-            files: oversizedFiles.map((file) => ({ path: file.path, bytes: file.bytes })),
-          },
-        );
-        await clearCodexAppServerBinding(params.sessionFile);
-        return undefined;
-      }
+    params.contextEngineActive === true && hasContextEngineThreadBootstrapProjection(binding);
+  const maxBytes = resolveCodexAppServerNativeThreadMaxBytes(params.config);
+  if (maxBytes !== undefined && !shouldDeferByteGuard) {
+    const oversizedFiles = rolloutFiles.filter((file) => file.bytes >= maxBytes);
+    if (oversizedFiles.length > 0) {
+      embeddedAgentLog.warn(
+        "codex app-server native transcript exceeded active byte limit; starting a fresh thread",
+        {
+          threadId: binding.threadId,
+          maxBytes,
+          files: oversizedFiles.map((file) => ({ path: file.path, bytes: file.bytes })),
+        },
+      );
+      await clearCodexAppServerBinding(params.sessionFile);
+      return undefined;
     }
   }
   const nativeTokenSnapshots = await Promise.all(
@@ -435,6 +446,7 @@ export async function rotateOversizedCodexAppServerStartupBinding(params: {
 export const testing = {
   parseCodexAppServerByteLimit,
   readCodexAppServerRolloutTokenSnapshotLine,
+  resolveCodexAppServerNativeThreadMaxBytes,
   resolveCodexAppServerNativeThreadTokenFuse,
   resolveCodexAppServerNativeThreadReserveTokens,
 };
