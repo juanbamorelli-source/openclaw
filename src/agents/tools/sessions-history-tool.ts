@@ -39,6 +39,8 @@ const SESSIONS_HISTORY_MAX_BYTES = 80 * 1024;
 const SESSIONS_HISTORY_WITH_TOOLS_MAX_BYTES = 24 * 1024;
 const SESSIONS_HISTORY_TEXT_MAX_CHARS = 4000;
 const SESSIONS_HISTORY_DEFAULT_LIMIT = 10;
+const SESSIONS_HISTORY_NON_TOOL_RAW_LIMIT_MULTIPLIER = 5;
+const SESSIONS_HISTORY_NON_TOOL_RAW_LIMIT_MAX = 100;
 type GatewayCaller = typeof callGateway;
 
 // sandbox policy handling is shared with sessions-list-tool via sessions-helpers.ts
@@ -282,15 +284,24 @@ export function createSessionsHistoryTool(opts?: {
       }
 
       const limit = readPositiveIntegerParam(params, "limit") ?? SESSIONS_HISTORY_DEFAULT_LIMIT;
+      const includeTools = Boolean(params.includeTools);
+      const historyLimit = includeTools
+        ? limit
+        : Math.max(
+            limit,
+            Math.min(
+              SESSIONS_HISTORY_NON_TOOL_RAW_LIMIT_MAX,
+              limit * SESSIONS_HISTORY_NON_TOOL_RAW_LIMIT_MULTIPLIER,
+            ),
+          );
       const result = await gatewayCall<{ messages: Array<unknown> }>({
         method: "chat.history",
-        params: { sessionKey: resolvedKey, limit },
+        params: { sessionKey: resolvedKey, limit: historyLimit },
       });
       const rawMessages = Array.isArray(result?.messages) ? result.messages : [];
-      const includeTools = Boolean(params.includeTools);
       const selectedMessages = includeTools
         ? rawMessages
-        : stripSessionHistoryToolMessages(rawMessages);
+        : stripSessionHistoryToolMessages(rawMessages).slice(-limit);
       const sanitizedMessages = selectedMessages.map((message) => sanitizeHistoryMessage(message));
       const contentTruncated = sanitizedMessages.some((entry) => entry.truncated);
       const contentRedacted = sanitizedMessages.some((entry) => entry.redacted);

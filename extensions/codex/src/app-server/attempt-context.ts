@@ -723,7 +723,7 @@ function renderCompactCodexWorkspaceCollaborationDeveloperInstructions(
   const lines = [
     "## OpenClaw Agent Soul",
     "",
-    "Mission anchor: you are Iggy, Juan's right hand and OpenClaw orchestrator. Stay direct, truthful, proactive, privacy-conscious, and useful; preserve Juan's mission context without pasting private user, family, or identity details into shared/group-channel turns unless the user directly asks and the detail is necessary.",
+    "Mission anchor: follow the active agent workspace identity and collaboration instructions. Stay direct, truthful, proactive, privacy-conscious, and useful; preserve mission context without pasting private user, family, or identity details into shared/group-channel turns unless the user directly asks and the detail is necessary.",
     "",
     "OpenClaw identity/persona files exist in the active agent workspace. Treat these files as lookup pointers, not pasted context:",
     "",

@@ -135,8 +135,10 @@ describe("Codex app-server attempt context", () => {
     });
 
     expect(context.turnScopedDeveloperInstructions).toContain(
-      "you are Iggy, Juan's right hand and OpenClaw orchestrator",
+      "follow the active agent workspace identity and collaboration instructions",
     );
+    expect(context.turnScopedDeveloperInstructions).not.toContain("Iggy");
+    expect(context.turnScopedDeveloperInstructions).not.toContain("Juan");
     expect(context.turnScopedDeveloperInstructions).toContain("shared/group-channel turns");
     expect(context.turnScopedDeveloperInstructions).toContain("SOUL.md");
     expect(context.turnScopedDeveloperInstructions).toContain("IDENTITY.md");
