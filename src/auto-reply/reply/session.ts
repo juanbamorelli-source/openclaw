@@ -118,6 +118,16 @@ function stripThreadIdFromOrigin(origin: SessionEntry["origin"]): SessionEntry["
   return Object.keys(rest).length > 0 ? rest : undefined;
 }
 
+function clearInterruptedRunningLifecycleState(entry: SessionEntry, isNewSession: boolean): void {
+  if (isNewSession || entry.abortedLastRun !== true || entry.status !== "running") {
+    return;
+  }
+  entry.status = undefined;
+  entry.startedAt = undefined;
+  entry.endedAt = undefined;
+  entry.runtimeMs = undefined;
+}
+
 function resolveExplicitSessionEndReason(matchedResetTriggerLower?: string): ReplySessionEndReason {
   return matchedResetTriggerLower === "/reset" ? "reset" : "new";
 }
@@ -733,6 +743,7 @@ export async function initSessionState(params: {
       origin: stripThreadIdFromOrigin(sessionEntry.origin),
     };
   }
+  clearInterruptedRunningLifecycleState(sessionEntry, isNewSession);
   if (!sessionEntry.chatType) {
     sessionEntry.chatType = "direct";
   }

@@ -1867,6 +1867,45 @@ describe("initSessionState reset policy", () => {
     expect(persisted[sessionKey]?.runtimeMs).toBe(9_000);
   });
 
+  it("clears interrupted stale running state when reusing a session", async () => {
+    vi.setSystemTime(new Date(2026, 0, 18, 5, 30, 0));
+    const root = await makeCaseDir("openclaw-reset-interrupted-running-entry-");
+    const storePath = path.join(root, "sessions.json");
+    const sessionKey = "agent:main:discord:channel:orchestrator";
+    const existingSessionId = "interrupted-running-old";
+    await writeSessionStoreFast(storePath, {
+      [sessionKey]: {
+        sessionId: existingSessionId,
+        updatedAt: Date.now(),
+        startedAt: Date.now() - 10_000,
+        runtimeMs: 10_000,
+        status: "running",
+        abortedLastRun: true,
+      },
+    });
+
+    const cfg = { session: { store: storePath } } as OpenClawConfig;
+    const result = await initSessionState({
+      ctx: { Body: "hello", SessionKey: sessionKey },
+      cfg,
+      commandAuthorized: true,
+    });
+
+    expect(result.isNewSession).toBe(false);
+    expect(result.sessionId).toBe(existingSessionId);
+
+    const persisted = JSON.parse(await fs.readFile(storePath, "utf-8")) as Record<
+      string,
+      SessionEntry
+    >;
+    expect(persisted[sessionKey]?.sessionId).toBe(existingSessionId);
+    expect(persisted[sessionKey]?.status).toBeUndefined();
+    expect(persisted[sessionKey]?.startedAt).toBeUndefined();
+    expect(persisted[sessionKey]?.endedAt).toBeUndefined();
+    expect(persisted[sessionKey]?.runtimeMs).toBeUndefined();
+    expect(persisted[sessionKey]?.abortedLastRun).toBe(true);
+  });
+
   it.each([
     {
       name: "non-main terminal rows ignore transcript mtime",
