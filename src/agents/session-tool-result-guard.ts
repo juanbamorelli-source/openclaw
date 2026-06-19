@@ -25,6 +25,7 @@ import { isTranscriptOnlyOpenClawAssistantModel } from "../shared/transcript-onl
 import { formatContextLimitTruncationNotice } from "./embedded-agent-runner/context-truncation-notice.js";
 import {
   DEFAULT_MAX_LIVE_TOOL_RESULT_CHARS,
+  enforceAggregateToolResultBudgetInSessionManager,
   truncateToolResultMessage,
 } from "./embedded-agent-runner/tool-result-truncation.js";
 import type { AgentMessage } from "./runtime/index.js";
@@ -647,6 +648,19 @@ export function installSessionToolResultGuard(
       }),
     };
   };
+  const enforceAggregateToolResultBudget = () => {
+    const sessionFile = getSessionFile();
+    const result = enforceAggregateToolResultBudgetInSessionManager({
+      sessionManager,
+      aggregateBudgetChars: maxToolResultChars,
+      sessionFile,
+      sessionKey: opts?.sessionKey,
+      agentId: opts?.agentId,
+    });
+    if (result.truncated) {
+      transcriptSeqByEntryId.clear();
+    }
+  };
   const originalAppendCompaction = sessionManager.appendCompaction.bind(sessionManager);
   const guardedAppendCompaction = ((
     ...args: Parameters<SessionManager["appendCompaction"]>
@@ -697,6 +711,7 @@ export function installSessionToolResultGuard(
           appendMessageAndCacheTranscriptSeq(
             capToolResultForPersistence(flushed, maxToolResultChars, redactionConfig),
           );
+          enforceAggregateToolResultBudget();
         }
       }
     }
@@ -748,9 +763,11 @@ export function installSessionToolResultGuard(
       if (!persisted) {
         return undefined;
       }
-      return appendMessageAndCacheTranscriptSeq(
+      const appended = appendMessageAndCacheTranscriptSeq(
         capToolResultForPersistence(persisted, maxToolResultChars, redactionConfig),
-      ).entryId;
+      );
+      enforceAggregateToolResultBudget();
+      return appended.entryId;
     }
 
     // Skip tool call extraction for aborted/errored assistant messages.

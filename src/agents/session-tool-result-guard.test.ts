@@ -62,6 +62,13 @@ function getPersistedMessages(sm: SessionManager): AgentMessage[] {
     .map((e) => (e as { message: AgentMessage }).message);
 }
 
+function getPersistedBranchMessages(sm: SessionManager): AgentMessage[] {
+  return sm
+    .getBranch()
+    .filter((e) => e.type === "message")
+    .map((e) => (e as { message: AgentMessage }).message);
+}
+
 function expectPersistedRoles(sm: SessionManager, expectedRoles: AgentMessage["role"][]) {
   // Role-order assertions prove where synthetic toolResult messages were inserted.
   const messages = getPersistedMessages(sm);
@@ -80,6 +87,17 @@ function getToolResultText(messages: AgentMessage[]): string {
     text: string;
   };
   return textBlock.text;
+}
+
+function getToolResultTexts(messages: AgentMessage[]): string[] {
+  return messages
+    .filter((m) => m.role === "toolResult")
+    .map((toolResult) => {
+      const block = (
+        toolResult as { content: Array<{ type: string; text?: string }> }
+      ).content.find((b) => b.type === "text");
+      return block?.text ?? "";
+    });
 }
 
 describe("installSessionToolResultGuard", () => {
@@ -453,6 +471,23 @@ describe("installSessionToolResultGuard", () => {
 
     const text = getToolResultText(getPersistedMessages(sm));
     expect(text).toBe(originalText);
+  });
+
+  it("enforces an aggregate replay budget while appending medium tool results", () => {
+    const sm = SessionManager.inMemory();
+    installSessionToolResultGuard(sm, {
+      maxToolResultChars: 8_000,
+    });
+
+    appendToolResultText(sm, "a".repeat(5_000));
+    appendToolResultText(sm, "b".repeat(5_000));
+    appendToolResultText(sm, "c".repeat(5_000));
+
+    const texts = getToolResultTexts(getPersistedBranchMessages(sm));
+    expect(texts).toHaveLength(3);
+    expect(texts.every((text) => text.length <= 8_000)).toBe(true);
+    expect(texts.reduce((sum, text) => sum + text.length, 0)).toBeLessThanOrEqual(8_000);
+    expect(texts.some((text) => text.includes("truncated"))).toBe(true);
   });
 
   it("blocks persistence when before_message_write returns block=true", () => {

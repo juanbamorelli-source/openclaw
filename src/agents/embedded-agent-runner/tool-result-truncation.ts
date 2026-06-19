@@ -855,6 +855,59 @@ export async function truncateOversizedToolResultsInSession(params: {
   }
 }
 
+export function enforceAggregateToolResultBudgetInSessionManager(params: {
+  sessionManager: SessionManager;
+  aggregateBudgetChars: number;
+  sessionFile?: string | null;
+  sessionId?: string;
+  sessionKey?: string;
+  agentId?: string;
+}): { truncated: boolean; truncatedCount: number; reason?: string } {
+  try {
+    const aggregateBudgetChars = Math.max(1, Math.floor(params.aggregateBudgetChars));
+    const branch = params.sessionManager.getBranch() as ToolResultBranchEntry[];
+    if (branch.length === 0) {
+      return { truncated: false, truncatedCount: 0, reason: "empty session" };
+    }
+
+    const replacements = buildAggregateToolResultReplacements({
+      branch,
+      aggregateBudgetChars,
+    });
+    if (replacements.length === 0) {
+      return { truncated: false, truncatedCount: 0, reason: "within aggregate budget" };
+    }
+
+    const rewriteResult = rewriteTranscriptEntriesInSessionManager({
+      sessionManager: params.sessionManager,
+      replacements,
+    });
+    if (rewriteResult.changed && params.sessionFile) {
+      emitSessionTranscriptUpdate({
+        sessionFile: params.sessionFile,
+        sessionKey: params.sessionKey,
+        ...(params.agentId ? { agentId: params.agentId } : {}),
+      });
+    }
+
+    log.info(
+      `[tool-result-truncation] Enforced aggregate tool-result budget in session ` +
+        `(aggregateBudgetChars=${aggregateBudgetChars} aggregate=${replacements.length}) ` +
+        `sessionKey=${params.sessionKey ?? params.sessionId ?? "unknown"}`,
+    );
+
+    return {
+      truncated: rewriteResult.changed,
+      truncatedCount: rewriteResult.rewrittenEntries,
+      reason: rewriteResult.reason,
+    };
+  } catch (err) {
+    const errMsg = formatErrorMessage(err);
+    log.warn(`[tool-result-truncation] Failed to enforce aggregate budget: ${errMsg}`);
+    return { truncated: false, truncatedCount: 0, reason: errMsg };
+  }
+}
+
 /**
  * Check if a tool result message exceeds the size limit for a given context window.
  */
