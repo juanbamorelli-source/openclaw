@@ -17,6 +17,7 @@ function makeParams(
     sessionKey?: string;
     agentId?: string;
     currentTurn?: NonNullable<SessionEntry["systemPromptReport"]>["currentTurn"];
+    includeToolRoutedMemory?: boolean;
   },
 ): HandleCommandsParams {
   return {
@@ -60,6 +61,18 @@ function makeParams(
             injectedChars: truncated ? 12_000 : 10_000,
             truncated,
           },
+          ...(options?.includeToolRoutedMemory
+            ? [
+                {
+                  name: "MEMORY.md",
+                  path: "/tmp/workspace/MEMORY.md",
+                  missing: false,
+                  rawChars: 30_000,
+                  injectedChars: 0,
+                  truncated: false,
+                },
+              ]
+            : []),
         ],
         skills: {
           promptChars: 10,
@@ -68,7 +81,20 @@ function makeParams(
         tools: {
           listChars: 10,
           schemaChars: 20,
-          entries: [{ name: "read", summaryChars: 10, schemaChars: 20, propertiesCount: 1 }],
+          entries: [
+            { name: "read", summaryChars: 10, schemaChars: 20, propertiesCount: 1 },
+            ...(options?.includeToolRoutedMemory
+              ? [
+                  {
+                    name: "memory_search",
+                    summaryChars: 10,
+                    schemaChars: 20,
+                    propertiesCount: 1,
+                  },
+                  { name: "memory_get", summaryChars: 10, schemaChars: 20, propertiesCount: 1 },
+                ]
+              : []),
+          ],
         },
       },
     },
@@ -94,6 +120,16 @@ describe("buildContextReply", () => {
   it("does not show bootstrap truncation warning when there is no truncation", async () => {
     const result = await buildContextReply(makeParams("/context list", false));
     expect(result.text).not.toContain("Bootstrap context is over configured limits");
+  });
+
+  it("labels tool-routed MEMORY.md without implying raw memory was injected", async () => {
+    const result = await buildContextReply(
+      makeParams("/context list", false, { includeToolRoutedMemory: true }),
+    );
+    expect(result.text).toContain("- MEMORY.md: TOOL-ROUTED");
+    expect(result.text).toContain("recall via memory_search/memory_get");
+    expect(result.text).toContain("raw contents are not pasted into prompt");
+    expect(result.text).not.toContain("- MEMORY.md: TRUNCATED");
   });
 
   it("falls back to config defaults when legacy reports are missing bootstrap limits", async () => {

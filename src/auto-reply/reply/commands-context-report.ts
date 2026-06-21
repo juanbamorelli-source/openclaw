@@ -24,6 +24,23 @@ function formatCharsAndTokens(chars: number): string {
   return `${formatInt(chars)} chars (~${formatInt(estimateTokensFromChars(chars))} tok)`;
 }
 
+function isMemoryToolRoutedBootstrapFile(params: {
+  file: SessionSystemPromptReport["injectedWorkspaceFiles"][number];
+  report: SessionSystemPromptReport;
+}): boolean {
+  if (
+    params.file.missing ||
+    params.file.name !== "MEMORY.md" ||
+    params.file.rawChars <= 0 ||
+    params.file.injectedChars !== 0 ||
+    params.file.truncated
+  ) {
+    return false;
+  }
+  const toolNames = new Set(params.report.tools.entries.map((tool) => tool.name));
+  return toolNames.has("memory_search") || toolNames.has("memory_get");
+}
+
 function parseContextArgs(commandBodyNormalized: string): string {
   if (commandBodyNormalized === "/context") {
     return "";
@@ -168,10 +185,20 @@ export async function buildContextReply(params: HandleCommandsParams): Promise<R
   }
 
   const fileLines = report.injectedWorkspaceFiles.map((f) => {
-    const status = f.missing ? "MISSING" : f.truncated ? "TRUNCATED" : "OK";
+    const memoryToolRouted = isMemoryToolRoutedBootstrapFile({ file: f, report });
+    const status = f.missing
+      ? "MISSING"
+      : memoryToolRouted
+        ? "TOOL-ROUTED"
+        : f.truncated
+          ? "TRUNCATED"
+          : "OK";
     const raw = f.missing ? "0" : formatCharsAndTokens(f.rawChars);
     const injected = f.missing ? "0" : formatCharsAndTokens(f.injectedChars);
-    return `- ${f.name}: ${status} | raw ${raw} | injected ${injected}`;
+    const routedNote = memoryToolRouted
+      ? " | recall via memory_search/memory_get; raw contents are not pasted into prompt"
+      : "";
+    return `- ${f.name}: ${status} | raw ${raw} | injected ${injected}${routedNote}`;
   });
 
   const sandboxLine = `Sandbox: mode=${report.sandbox?.mode ?? "unknown"} sandboxed=${report.sandbox?.sandboxed ?? false}`;
