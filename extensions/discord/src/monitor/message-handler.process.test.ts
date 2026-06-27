@@ -135,6 +135,8 @@ type DispatchInboundParams = {
     }) => Promise<void> | void;
     onReasoningEnd?: () => Promise<void> | void;
     onToolStart?: (payload: {
+      itemId?: string;
+      toolCallId?: string;
       name?: string;
       phase?: string;
       args?: Record<string, unknown>;
@@ -3030,6 +3032,50 @@ describe("processDiscordMessage draft streaming", () => {
     await runProcessDiscordMessage(ctx);
 
     expect(draftStream.update).toHaveBeenCalledWith("Clawing...\n\n🧩 First\n🧩 Second\n🧩 Third");
+  });
+
+  it("updates keyed Discord tool progress in place across commentary", async () => {
+    const draftStream = createMockDraftStreamForTest();
+
+    dispatchInboundMessage.mockImplementationOnce(async (params?: DispatchInboundParams) => {
+      await params?.replyOptions?.onToolStart?.({
+        itemId: "tool-exec-1",
+        toolCallId: "call-exec-1",
+        name: "exec",
+        phase: "start",
+      });
+      await params?.replyOptions?.onItemEvent?.({
+        itemId: "preamble-1",
+        kind: "preamble",
+        progressText: "Checking the handoff state.",
+      });
+      await params?.replyOptions?.onToolStart?.({
+        itemId: "tool-exec-1",
+        toolCallId: "call-exec-1",
+        name: "exec",
+        phase: "end",
+      });
+      return createNoQueuedDispatchResult();
+    });
+
+    const ctx = await createAutomaticSourceDeliveryContext({
+      discordConfig: {
+        streaming: {
+          mode: "progress",
+          progress: {
+            label: false,
+            commentary: true,
+            commandText: "status",
+          },
+        },
+      },
+    });
+
+    await runProcessDiscordMessage(ctx);
+
+    const lastUpdate = draftStream.update.mock.calls.at(-1)?.[0];
+    expect(lastUpdate).toBe("🛠️ Exec\n_Checking the handoff state._");
+    expect(lastUpdate?.match(/Exec/g)).toHaveLength(1);
   });
 
   it("skips empty apply_patch starts and renders the patch summary", async () => {

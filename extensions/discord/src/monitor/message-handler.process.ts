@@ -1017,6 +1017,8 @@ async function processDiscordMessageInner(
               discordConfig,
               {
                 event: "tool",
+                itemId: payload.itemId,
+                toolCallId: payload.toolCallId,
                 name: payload.name,
                 phase: payload.phase,
                 args: payload.args,
