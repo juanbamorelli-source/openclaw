@@ -183,6 +183,17 @@ function isClosedMemoryStoreError(error: unknown): boolean {
   );
 }
 
+function isRemoteEmbeddingAuthExpiredError(error: unknown): boolean {
+  const message = formatErrorMessage(error).toLowerCase();
+  return (
+    message.includes("embeddings failed") &&
+    (message.includes("token_expired") ||
+      message.includes("invalid bearer") ||
+      message.includes("expired token") ||
+      message.includes("http 401"))
+  );
+}
+
 function buildRecallKey(
   result: Pick<MemorySearchResult, "source" | "path" | "startLine" | "endLine">,
 ): string {
@@ -459,18 +470,30 @@ export function createMemorySearchTool(options: {
                   },
                   ...(searchSources ? { sources: searchSources } : {}),
                 };
-                try {
-                  rawResults = await activeMemory.manager.search(query, searchOptions);
-                } catch (error) {
-                  if (!isClosedMemoryStoreError(error)) {
-                    throw error;
-                  }
+                const refreshManagerAndSearch = async () => {
                   const refreshed = await getMemoryManagerContext({ cfg, agentId });
                   if ("error" in refreshed) {
-                    throw error;
+                    throw new Error(refreshed.error ?? "memory search unavailable");
                   }
                   activeMemory = refreshed;
                   rawResults = await activeMemory.manager.search(query, searchOptions);
+                };
+                try {
+                  rawResults = await activeMemory.manager.search(query, searchOptions);
+                } catch (error) {
+                  if (isRemoteEmbeddingAuthExpiredError(error)) {
+                    const { closeMemorySearchManager } = await loadMemoryToolRuntime();
+                    await closeMemorySearchManager({ cfg, agentId });
+                    await refreshManagerAndSearch().catch(() => {
+                      throw error;
+                    });
+                  } else if (isClosedMemoryStoreError(error)) {
+                    await refreshManagerAndSearch().catch(() => {
+                      throw error;
+                    });
+                  } else {
+                    throw error;
+                  }
                 }
                 const statusBeforeRetry = activeMemory.manager.status();
                 pausedIndexIdentityReason =
