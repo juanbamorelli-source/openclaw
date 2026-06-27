@@ -1,6 +1,8 @@
 // Memory Core tests cover tools plugin behavior.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  getCloseMemorySearchManagerMockCalls,
+  getCloseMemorySearchManagerMockParams,
   getMemorySearchManagerMockCalls,
   getMemorySearchManagerMockConfigs,
   getMemorySearchManagerMockParams,
@@ -224,6 +226,42 @@ describe("memory_search unavailable payloads", () => {
     ]);
     expect(searchCalls).toBe(2);
     expect(getMemorySearchManagerMockCalls()).toBe(2);
+  });
+
+  it("retires the cached manager and retries once after an expired embedding auth token", async () => {
+    let searchCalls = 0;
+    setMemorySearchImpl(async () => {
+      searchCalls += 1;
+      if (searchCalls === 1) {
+        throw new Error('openai embeddings failed: HTTP 401: {"error":{"code":"token_expired"}}');
+      }
+      return [
+        {
+          path: "MEMORY.md",
+          startLine: 1,
+          endLine: 1,
+          score: 0.9,
+          snippet: "Auth refreshed memory hit.",
+          source: "memory" as const,
+        },
+      ];
+    });
+
+    const config = {
+      agents: { list: [{ id: "main", default: true }] },
+      memory: { citations: "off" },
+    };
+    const tool = createMemorySearchToolOrThrow({ config });
+    const result = await tool.execute("expired-auth", { query: "auth refresh" });
+
+    expect((result.details as { results?: Array<{ path: string }> }).results?.[0]).toMatchObject({
+      path: "MEMORY.md",
+      snippet: "Auth refreshed memory hit.",
+    });
+    expect(searchCalls).toBe(2);
+    expect(getMemorySearchManagerMockCalls()).toBe(2);
+    expect(getCloseMemorySearchManagerMockCalls()).toBe(1);
+    expect(getCloseMemorySearchManagerMockParams()).toEqual([{ cfg: config, agentId: "main" }]);
   });
 
   it("forces a sync and retries once when the first search has zero hits", async () => {
