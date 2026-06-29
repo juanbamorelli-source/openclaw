@@ -31,7 +31,7 @@ Most skills configuration lives under `skills` in
       autonomous: { enabled: false },
       approvalPolicy: "pending",
       maxPending: 50,
-      maxSkillBytes: 40000,
+      maxSkillBytes: 200000,
     },
     entries: {
       "image-lab": {
@@ -337,9 +337,10 @@ different visible skill set per agent.
   Maximum pending and quarantined proposals retained per workspace.
 </ParamField>
 
-<ParamField path="skills.workshop.maxSkillBytes" type="number" default="40000">
-  Maximum proposal body size in bytes. Proposal descriptions are hard-capped at
-  160 bytes because they appear in discovery and listing output.
+<ParamField path="skills.workshop.maxSkillBytes" type="number" default="200000">
+  Maximum full replacement `SKILL.md` size in bytes stored in Workshop
+  proposals. Proposal descriptions are hard-capped at 160 bytes because they
+  appear in discovery and listing output.
 </ParamField>
 
 ## Symlinked skill roots

@@ -16,7 +16,7 @@ import { resolveSkillWorkshopConfig, type SkillWorkshopConfig } from "./config.j
 import {
   readProposalFrontmatter,
   renderProposalMarkdown,
-  stripProposalFrontmatterForSkill,
+  resolveAppliedSkillContent,
 } from "./frontmatter.js";
 import {
   assertInsideWorkspace,
@@ -330,7 +330,6 @@ export async function proposeUpdateSkill(
     name: targetSkill.skillKey,
     description,
     content: input.content,
-    fallbackFrontmatterContent: currentContent,
     date: now,
   });
   const id = createSkillProposalId(targetSkill.skillKey || targetSkill.name);
@@ -427,7 +426,6 @@ export async function reviseSkillProposal(
       name: record.target.skillKey,
       description,
       content: input.content,
-      fallbackFrontmatterContent: read.content,
       version: nextVersion,
       date: now,
     });
@@ -530,6 +528,7 @@ export async function applySkillProposal(
 
     assertInsideWorkspace(input.workspaceDir, record.target.skillFile, "skill file");
     assertInsideWorkspace(input.workspaceDir, record.target.skillDir, "skill directory");
+    const skillContent = resolveAppliedSkillContent(content, record.target.skillKey);
     const targetState = await readApplyTargetState(record, supportFiles);
     const rollback = createSkillProposalRollback({
       proposalId: record.id,
@@ -547,7 +546,6 @@ export async function applySkillProposal(
       rollback,
     });
 
-    const skillContent = stripProposalFrontmatterForSkill(content);
     await publishProposalTarget({
       workspaceDir: input.workspaceDir,
       record,

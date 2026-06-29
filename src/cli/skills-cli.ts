@@ -567,10 +567,10 @@ export function registerSkillsCli(program: Command) {
     .description("Create a pending proposal for a new workspace skill")
     .requiredOption("--name <name>", "Skill name")
     .requiredOption("--description <description>", "Skill description")
-    .option("--proposal <path>", "Path to PROPOSAL.md draft content")
+    .option("--proposal <path>", "Path to full replacement SKILL.md draft content")
     .option(
       "--proposal-dir <path>",
-      "Path to proposal directory with PROPOSAL.md and UTF-8 text support files",
+      "Path to proposal directory with PROPOSAL.md full replacement content and UTF-8 text support files",
     )
     .option("--goal <text>", "Proposal or improvement goal")
     .option("--evidence <text>", "Evidence or notes for the proposal")
@@ -619,10 +619,10 @@ export function registerSkillsCli(program: Command) {
     .command("propose-update")
     .description("Create a pending proposal for an existing workspace skill")
     .argument("<skill>", "Skill name or key")
-    .option("--proposal <path>", "Path to PROPOSAL.md draft content")
+    .option("--proposal <path>", "Path to full replacement SKILL.md draft content")
     .option(
       "--proposal-dir <path>",
-      "Path to proposal directory with PROPOSAL.md and UTF-8 text support files",
+      "Path to proposal directory with PROPOSAL.md full replacement content and UTF-8 text support files",
     )
     .option("--description <text>", "Concise proposal description")
     .option("--goal <text>", "Proposal or improvement goal")
@@ -676,10 +676,10 @@ export function registerSkillsCli(program: Command) {
     .command("revise")
     .description("Revise a pending skill proposal")
     .argument("<proposal-id>", "Skill proposal id")
-    .option("--proposal <path>", "Path to revised PROPOSAL.md draft content")
+    .option("--proposal <path>", "Path to revised full replacement SKILL.md draft content")
     .option(
       "--proposal-dir <path>",
-      "Path to revised proposal directory with PROPOSAL.md and UTF-8 text support files",
+      "Path to revised proposal directory with PROPOSAL.md full replacement content and UTF-8 text support files",
     )
     .option("--description <description>", "Replacement proposal description")
     .option("--goal <text>", "Replacement research or improvement goal")

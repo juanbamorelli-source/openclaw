@@ -95,7 +95,7 @@ const SkillWorkshopToolSchema = Type.Object(
     proposal_content: Type.Optional(
       Type.String({
         description:
-          "Full proposed procedure markdown for action=create, action=update, or action=revise. It will be stored as PROPOSAL.md. Keep under configured skills.workshop.maxSkillBytes; default max is 40000 bytes.",
+          "Full replacement SKILL.md content for action=create, action=update, or action=revise. Include the complete live skill frontmatter and body. It will be wrapped in PROPOSAL.md and later applied only if the stripped result is still a valid SKILL.md. Keep under configured skills.workshop.maxSkillBytes; default max is 200000 bytes.",
       }),
     ),
     support_files: Type.Optional(

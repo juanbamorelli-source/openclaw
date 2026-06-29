@@ -18,7 +18,7 @@ const DEFAULT_CONFIG: SkillWorkshopConfig = {
   },
   approvalPolicy: "pending",
   maxPending: 50,
-  maxSkillBytes: 40_000,
+  maxSkillBytes: 200_000,
 };
 
 function readBoolean(value: unknown, fallback: boolean): boolean {
