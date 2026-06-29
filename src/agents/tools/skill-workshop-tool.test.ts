@@ -3,6 +3,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { renderSkillMarkdown } from "../../skills/workshop/frontmatter.js";
 import {
   createOpenClawTestState,
   type OpenClawTestState,
@@ -27,6 +28,10 @@ afterEach(async () => {
   await testState.cleanup();
   await tempDirs.cleanup();
 });
+
+function makeSkillContent(name: string, description: string, body: string): string {
+  return renderSkillMarkdown({ name, description, body });
+}
 
 describe("skill_workshop tool", () => {
   it("is exposed in the OpenClaw tool set", async () => {
@@ -88,7 +93,11 @@ describe("skill_workshop tool", () => {
       action: "create",
       name: "Weather Planner",
       description: "Plan around current weather",
-      proposal_content: "# Weather Planner\n\nCheck weather before outdoor recommendations.\n",
+      proposal_content: makeSkillContent(
+        "weather-planner",
+        "Plan around current weather",
+        "# Weather Planner\n\nCheck weather before outdoor recommendations.\n",
+      ),
       support_files: [
         {
           path: "references/weather.md",
@@ -120,6 +129,18 @@ describe("skill_workshop tool", () => {
         "utf8",
       ),
     ).resolves.toContain("status: proposal");
+    await expect(
+      fs.readFile(
+        path.join(
+          stateDir,
+          "skill-workshop",
+          "proposals",
+          (result.details as { id: string }).id,
+          "PROPOSAL.md",
+        ),
+        "utf8",
+      ),
+    ).resolves.toContain('content-format: "skill-replacement-v2"');
     await expect(
       fs
         .readFile(
@@ -158,7 +179,11 @@ describe("skill_workshop tool", () => {
     const revised = await tool.execute("call-2", {
       action: "revise",
       proposal_id: (result.details as { id: string }).id,
-      proposal_content: "# Weather Planner\n\nCheck weather, alerts, and timing.\n",
+      proposal_content: makeSkillContent(
+        "weather-planner",
+        "Plan around current weather",
+        "# Weather Planner\n\nCheck weather, alerts, and timing.\n",
+      ),
       support_files: [
         {
           path: "references/weather.md",
@@ -246,7 +271,11 @@ describe("skill_workshop tool", () => {
     const revisedByName = await tool.execute("call-5", {
       action: "revise",
       name: "weather-planner",
-      proposal_content: "# Weather Planner\n\nCheck weather, alerts, timing, and location.\n",
+      proposal_content: makeSkillContent(
+        "weather-planner",
+        "Plan around current weather",
+        "# Weather Planner\n\nCheck weather, alerts, timing, and location.\n",
+      ),
     });
 
     expect(revisedByName.details).toMatchObject({
@@ -267,7 +296,11 @@ describe("skill_workshop tool", () => {
       action: "create",
       name: "Weather Planner",
       description: "Plan around current weather",
-      proposal_content: "# Weather Planner\n\nCheck weather before outdoor recommendations.\n",
+      proposal_content: makeSkillContent(
+        "weather-planner",
+        "Plan around current weather",
+        "# Weather Planner\n\nCheck weather before outdoor recommendations.\n",
+      ),
       support_files: [
         {
           path: "references/weather.md",
@@ -310,7 +343,11 @@ describe("skill_workshop tool", () => {
       action: "update",
       skill_name: "weather-planner",
       description: "Refresh weather planning steps",
-      proposal_content: "# Weather Planner\n\nCheck weather, alerts, and timing.\n",
+      proposal_content: makeSkillContent(
+        "weather-planner",
+        "Refresh weather planning steps",
+        "# Weather Planner\n\nCheck weather, alerts, and timing.\n",
+      ),
     });
 
     expect((update.content[0] as { text: string }).text).toBe(
@@ -326,7 +363,11 @@ describe("skill_workshop tool", () => {
       action: "create",
       name: "Rejected Skill",
       description: "Rejected proposal",
-      proposal_content: "# Rejected Skill\n\nDo not apply this.\n",
+      proposal_content: makeSkillContent(
+        "rejected-skill",
+        "Rejected proposal",
+        "# Rejected Skill\n\nDo not apply this.\n",
+      ),
     });
     const rejectedId = (rejected.details as { id: string }).id;
     const rejectResult = await tool.execute("call-4", {
@@ -352,7 +393,11 @@ describe("skill_workshop tool", () => {
       action: "create",
       name: "Quarantined Skill",
       description: "Quarantined proposal",
-      proposal_content: "# Quarantined Skill\n\nDo not apply this.\n",
+      proposal_content: makeSkillContent(
+        "quarantined-skill",
+        "Quarantined proposal",
+        "# Quarantined Skill\n\nDo not apply this.\n",
+      ),
     });
     const quarantinedId = (quarantined.details as { id: string }).id;
     const quarantineResult = await tool.execute("call-6", {
@@ -376,6 +421,40 @@ describe("skill_workshop tool", () => {
     ).rejects.toThrow();
   });
 
+  it("rejects proposal prose that is not a full replacement SKILL.md through the tool path", async () => {
+    const workspaceDir = await tempDirs.make("openclaw-skill-workshop-tool-");
+    const tool = createSkillWorkshopTool({ workspaceDir, config: {}, agentId: "main" });
+
+    const created = await tool.execute("call-invalid", {
+      action: "create",
+      name: "Patch Notes",
+      description: "Only proposal prose",
+      proposal_content: "# Patch Notes\n\nThis is review prose, not a live skill.\n",
+    });
+    const proposalId = (created.details as { id: string }).id;
+
+    await expect(
+      tool.execute("call-invalid-apply", {
+        action: "apply",
+        proposal_id: proposalId,
+      }),
+    ).rejects.toThrow("Proposal draft must contain a full replacement SKILL.md");
+    await expect(
+      fs.access(path.join(workspaceDir, "skills", "patch-notes", "SKILL.md")),
+    ).rejects.toThrow();
+    expect(
+      (
+        await tool.execute("call-invalid-inspect", {
+          action: "inspect",
+          proposal_id: proposalId,
+        })
+      ).details,
+    ).toMatchObject({
+      id: proposalId,
+      status: "pending",
+    });
+  });
+
   it("scopes proposal discovery to the tool workspace", async () => {
     const firstWorkspaceDir = await tempDirs.make("openclaw-skill-workshop-tool-first-");
     const secondWorkspaceDir = await tempDirs.make("openclaw-skill-workshop-tool-second-");
@@ -394,13 +473,21 @@ describe("skill_workshop tool", () => {
       action: "create",
       name: "First Workspace Skill",
       description: "First workspace proposal",
-      proposal_content: "# First\n",
+      proposal_content: makeSkillContent(
+        "first-workspace-skill",
+        "First workspace proposal",
+        "# First\n",
+      ),
     });
     const second = await secondTool.execute("call-2", {
       action: "create",
       name: "Second Workspace Skill",
       description: "Second workspace proposal",
-      proposal_content: "# Second\n",
+      proposal_content: makeSkillContent(
+        "second-workspace-skill",
+        "Second workspace proposal",
+        "# Second\n",
+      ),
     });
 
     const listed = await firstTool.execute("call-3", {

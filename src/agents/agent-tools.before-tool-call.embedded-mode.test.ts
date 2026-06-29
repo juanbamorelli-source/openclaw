@@ -347,6 +347,7 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
       approvalResolution: PluginApprovalResolutions.ALLOW_ONCE,
     });
     const approvalCall = requireApprovalRequestCall("skill_workshop approval request");
+    expect(approvalCall.timeoutParams.timeoutMs).toBe(70_000);
     expect(approvalCall.request.pluginId).toBeUndefined();
     expect(approvalCall.request.title).toBe("Apply workspace skill proposal");
     expect(approvalCall.request.description).toBe(
@@ -354,6 +355,7 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
     );
     expect(approvalCall.request.severity).toBe("warning");
     expect(approvalCall.request.allowedDecisions).toEqual(["allow-once", "deny"]);
+    expect(approvalCall.request.timeoutMs).toBe(60_000);
     expect(approvalCall.request.toolName).toBe("skill_workshop");
     expect(approvalCall.request.toolCallId).toBe("call-skill-apply");
     expect(runBeforeToolCallMock).toHaveBeenCalledTimes(1);
@@ -392,8 +394,10 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
       const adjustedApprovalCall = requireApprovalRequestCall(
         "skill_workshop adjusted approval request",
       );
+      expect(adjustedApprovalCall.timeoutParams.timeoutMs).toBe(70_000);
       expect(adjustedApprovalCall.request.title).toBe("Apply workspace skill proposal");
       expect(adjustedApprovalCall.request.toolName).toBe("skill_workshop");
+      expect(adjustedApprovalCall.request.timeoutMs).toBe(60_000);
       expect(adjustedApprovalCall.request.toolCallId).toBe("call-skill-hook-apply");
       expect(runBeforeToolCallMock).toHaveBeenCalledTimes(1);
     }

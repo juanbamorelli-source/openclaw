@@ -2,6 +2,7 @@
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { resolveSkillWorkshopConfig } from "../workshop/config.js";
+import { renderSkillMarkdown } from "../workshop/frontmatter.js";
 import { listSkillProposals, proposeCreateSkill, proposeUpdateSkill } from "../workshop/service.js";
 import { readWorkspaceSkillFile, resolveSkillProposalTarget } from "../workshop/store.js";
 import { extractDurableInstructionProposal } from "./signals.js";
@@ -72,7 +73,11 @@ export async function runSkillResearchAutoCapture(params: {
             config: params.config,
             name: proposal.skillName,
             description: proposal.description,
-            content: proposal.content,
+            content: renderSkillMarkdown({
+              name: proposal.skillName,
+              description: proposal.description,
+              body: proposal.content,
+            }),
             createdBy: "skill-workshop",
             goal: proposal.goal,
             evidence: proposal.evidence,

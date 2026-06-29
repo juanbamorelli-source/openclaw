@@ -4,6 +4,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderSkillMarkdown } from "../../skills/workshop/frontmatter.js";
 import {
   createOpenClawTestState,
   type OpenClawTestState,
@@ -86,11 +87,19 @@ describe("skills proposal gateway handlers", () => {
     await tempDirs.cleanup();
   });
 
+  function makeSkillContent(name: string, description: string, body: string): string {
+    return renderSkillMarkdown({ name, description, body });
+  }
+
   it("creates, lists, inspects, and applies a proposal", async () => {
     const create = await callHandler("skills.proposals.create", {
       name: "Weather Planner",
       description: "Plan around current weather",
-      content: "# Weather Planner\n\nCheck weather before outdoor recommendations.\n",
+      content: makeSkillContent(
+        "weather-planner",
+        "Plan around current weather",
+        "# Weather Planner\n\nCheck weather before outdoor recommendations.\n",
+      ),
       supportFiles: [
         {
           path: "references/weather.md",
@@ -116,6 +125,9 @@ describe("skills proposal gateway handlers", () => {
     });
     expect(inspect.ok).toBe(true);
     expect((inspect.response as { content: string }).content).toContain("status: proposal");
+    expect((inspect.response as { content: string }).content).toContain(
+      'content-format: "skill-replacement-v2"',
+    );
     expect(
       (
         inspect.response as {
@@ -132,7 +144,11 @@ describe("skills proposal gateway handlers", () => {
     const revise = await callHandler("skills.proposals.revise", {
       proposalId: created.record.id,
       description: "Plan with current weather",
-      content: "# Weather Planner\n\nUse current weather and alerts.\n",
+      content: makeSkillContent(
+        "weather-planner",
+        "Plan with current weather",
+        "# Weather Planner\n\nUse current weather and alerts.\n",
+      ),
     });
     expect(revise.ok).toBe(true);
     expect(
@@ -162,7 +178,7 @@ describe("skills proposal gateway handlers", () => {
     const first = await callHandler("skills.proposals.create", {
       name: "First Gateway Skill",
       description: "First workspace proposal",
-      content: "# First\n",
+      content: makeSkillContent("first-gateway-skill", "First workspace proposal", "# First\n"),
     });
     expect(first.ok).toBe(true);
     const firstCreated = first.response as { record: { id: string } };
@@ -172,7 +188,7 @@ describe("skills proposal gateway handlers", () => {
     const second = await callHandler("skills.proposals.create", {
       name: "Second Gateway Skill",
       description: "Second workspace proposal",
-      content: "# Second\n",
+      content: makeSkillContent("second-gateway-skill", "Second workspace proposal", "# Second\n"),
     });
     expect(second.ok).toBe(true);
     const secondCreated = second.response as { record: { id: string } };
@@ -213,7 +229,11 @@ describe("skills proposal gateway handlers", () => {
     const create = await callHandler("skills.proposals.create", {
       name: "Support File Sampler",
       description: "Samples support files",
-      content: "# Support File Sampler\n\nSample support files.\n",
+      content: makeSkillContent(
+        "support-file-sampler",
+        "Samples support files",
+        "# Support File Sampler\n\nSample support files.\n",
+      ),
     });
     expect(create.ok).toBe(true);
     const created = create.response as { record: { id: string } };
@@ -259,7 +279,11 @@ describe("skills proposal gateway handlers", () => {
     const create = await callHandler("skills.proposals.create", {
       name: "Applied Sampler",
       description: "Already applied proposal",
-      content: "# Applied Sampler\n\nSample support files.\n",
+      content: makeSkillContent(
+        "applied-sampler",
+        "Already applied proposal",
+        "# Applied Sampler\n\nSample support files.\n",
+      ),
     });
     expect(create.ok).toBe(true);
     const created = create.response as { record: { id: string } };

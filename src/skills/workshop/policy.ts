@@ -61,9 +61,12 @@ export function resolveSkillWorkshopToolApproval(params: {
     return undefined;
   }
   const text = lifecycleApprovalText(action);
+  // Keep lifecycle approval shorter than the dynamic tool watchdog so apply
+  // can fail deterministically instead of surfacing a runtime timeout.
   return {
     requireApproval: {
       ...text,
+      timeoutMs: 60_000,
       allowedDecisions: ["allow-once", "deny"],
     },
   };

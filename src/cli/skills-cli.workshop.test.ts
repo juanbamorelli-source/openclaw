@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Command } from "commander";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderSkillMarkdown } from "../skills/workshop/frontmatter.js";
 import {
   createOpenClawTestState,
   type OpenClawTestState,
@@ -111,12 +112,20 @@ describe("skills workshop cli", () => {
     await tempDirs.cleanup();
   });
 
+  function makeSkillContent(name: string, description: string, body: string): string {
+    return renderSkillMarkdown({ name, description, body });
+  }
+
   it("creates, lists, inspects, and applies a skill proposal", async () => {
     const draftPath = path.join(mocks.workspaceDir, "proposal-draft");
     await fs.mkdir(path.join(draftPath, "references"), { recursive: true });
     await fs.writeFile(
       path.join(draftPath, "PROPOSAL.md"),
-      "# Paris Weather\n\nCheck current weather before advice.\n",
+      makeSkillContent(
+        "paris-weather",
+        "Weather lookup workflow",
+        "# Paris Weather\n\nCheck current weather before advice.\n",
+      ),
       "utf8",
     );
     await fs.writeFile(
@@ -145,13 +154,18 @@ describe("skills workshop cli", () => {
 
     await runCommand(["skills", "workshop", "inspect", proposalId!]);
     expect(mocks.runtimeStdout.at(-1)).toContain("status: proposal");
+    expect(mocks.runtimeStdout.at(-1)).toContain('content-format: "skill-replacement-v2"');
     expect(mocks.runtimeStdout.at(-1)).toContain("--- references/weather.md ---");
     expect(mocks.runtimeStdout.at(-1)).toContain("Use current conditions before recommendations.");
 
     const revisedPath = path.join(mocks.workspaceDir, "revised-proposal.md");
     await fs.writeFile(
       revisedPath,
-      "# Paris Weather\n\nCheck current weather and alerts before advice.\n",
+      makeSkillContent(
+        "paris-weather",
+        "Revised weather lookup workflow",
+        "# Paris Weather\n\nCheck current weather and alerts before advice.\n",
+      ),
       "utf8",
     );
     await runCommand([
@@ -179,10 +193,46 @@ describe("skills workshop cli", () => {
     ).resolves.toContain("Use current conditions");
   });
 
+  it("applies a large full replacement skill proposal through the CLI without config changes", async () => {
+    const draftPath = path.join(mocks.workspaceDir, "large-proposal");
+    await fs.mkdir(draftPath, { recursive: true });
+    const largeBody = "# Project Producer\n\n" + "x".repeat(94_500);
+    const proposalContent = makeSkillContent(
+      "project-producer",
+      "Project producer",
+      `${largeBody}\n`,
+    );
+    await fs.writeFile(path.join(draftPath, "PROPOSAL.md"), proposalContent, "utf8");
+
+    await runCommand([
+      "skills",
+      "workshop",
+      "propose-create",
+      "--name",
+      "Project Producer",
+      "--description",
+      "Project producer",
+      "--proposal",
+      path.join(draftPath, "PROPOSAL.md"),
+    ]);
+
+    const proposalId = mocks.runtimeStdout.at(-1);
+    expect(proposalId).toMatch(/^project-producer-/);
+
+    await runCommand(["skills", "workshop", "apply", proposalId!]);
+    await expect(
+      fs.readFile(path.join(mocks.workspaceDir, "skills", "project-producer", "SKILL.md"), "utf8"),
+    ).resolves.toContain("x".repeat(2_000));
+  });
+
   it("scopes list and inspect to the selected workspace", async () => {
     const firstWorkspaceDir = mocks.workspaceDir;
     const draftPath = path.join(firstWorkspaceDir, "proposal-draft.md");
-    await fs.writeFile(draftPath, "# First CLI Skill\n", "utf8");
+    await fs.writeFile(
+      draftPath,
+      makeSkillContent("first-cli-skill", "First workspace proposal", "# First CLI Skill\n"),
+      "utf8",
+    );
 
     await runCommand([
       "skills",

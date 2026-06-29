@@ -118,20 +118,22 @@ openclaw skills workshop quarantine <proposal-id> --reason "Needs security revie
 ## Proposal content
 
 While pending, the proposal is stored as `PROPOSAL.md` with proposal-only
-frontmatter:
+frontmatter wrapped around the full replacement `SKILL.md` content:
 
 ```markdown
 ---
 name: "morning-catchup"
 description: "Daily inbox catch-up: triage, archive, surface, draft, plan"
 status: proposal
+content-format: "skill-replacement-v2"
 version: "v1"
 date: "2026-05-30T00:00:00.000Z"
 ---
 ```
 
-On apply, Skill Workshop writes the active `SKILL.md` and removes proposal-only
-fields: `status`, proposal `version`, and proposal `date`.
+On apply, Skill Workshop removes the proposal-only fields and writes the inner
+replacement `SKILL.md` after validating that the stripped content still looks
+like a live skill document with `name` and `description` frontmatter.
 
 ## Support files
 
@@ -182,7 +184,7 @@ direct filesystem operations.
       },
       approvalPolicy: "pending",
       maxPending: 50,
-      maxSkillBytes: 40000,
+      maxSkillBytes: 200000,
     },
   },
 }
@@ -195,7 +197,7 @@ direct filesystem operations.
 - `approvalPolicy: "auto"`: skips that approval prompt. The agent must still
   call the action.
 - `maxPending`: caps pending and quarantined proposals per workspace.
-- `maxSkillBytes`: caps proposal body size. Default: `40000`.
+- `maxSkillBytes`: caps the full replacement `SKILL.md` payload stored in the proposal. Default: `200000`.
 
 Proposal descriptions are always capped at 160 bytes.
 
@@ -241,7 +243,7 @@ Default state directory: `~/.openclaw`.
 ## Limits
 
 - Description: 160 bytes.
-- Proposal body: `skills.workshop.maxSkillBytes` (default 40,000).
+- Proposal body: `skills.workshop.maxSkillBytes` (default 200,000).
 - Support files: 64 per proposal.
 - Support file size: 256 KB each, 2 MB total.
 - Pending and quarantined proposals: `skills.workshop.maxPending` per workspace
@@ -249,14 +251,15 @@ Default state directory: `~/.openclaw`.
 
 ## Troubleshooting
 
-| Problem                                        | Resolution                                                                                   |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `Skill proposal description is too large`      | Shorten `description` to 160 bytes or less.                                                  |
-| `Skill proposal content is too large`          | Shorten the proposal body or raise `skills.workshop.maxSkillBytes`.                          |
-| `Target skill changed after proposal creation` | Revise the proposal against the current target, or create a new proposal.                    |
-| `Proposal scan failed`                         | Inspect scanner findings, then revise or quarantine the proposal.                            |
-| `Support file paths must be under one of...`   | Move support files under `assets/`, `examples/`, `references/`, `scripts/`, or `templates/`. |
-| Proposal does not show in list                 | Check the selected `--agent` workspace and `OPENCLAW_STATE_DIR`.                             |
+| Problem                                                   | Resolution                                                                                   |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `Skill proposal description is too large`                 | Shorten `description` to 160 bytes or less.                                                  |
+| `Skill proposal content is too large`                     | Shorten the full replacement `SKILL.md` payload or raise `skills.workshop.maxSkillBytes`.    |
+| `Proposal draft must contain a full replacement SKILL.md` | Include `name` and `description` frontmatter in the full live skill content before applying. |
+| `Target skill changed after proposal creation`            | Revise the proposal against the current target, or create a new proposal.                    |
+| `Proposal scan failed`                                    | Inspect scanner findings, then revise or quarantine the proposal.                            |
+| `Support file paths must be under one of...`              | Move support files under `assets/`, `examples/`, `references/`, `scripts/`, or `templates/`. |
+| Proposal does not show in list                            | Check the selected `--agent` workspace and `OPENCLAW_STATE_DIR`.                             |
 
 ## Related
 
