@@ -574,6 +574,7 @@ export function createOpenClawTools(
     ...(resolvedConfig ? { config: resolvedConfig } : {}),
     ...(options?.agentSessionKey ? { sessionKey: options.agentSessionKey } : {}),
     ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
+    ...(options?.agentChannel ? { messageProvider: options.agentChannel } : {}),
     ...(options?.currentChannelId ? { channelId: options.currentChannelId } : {}),
     loopDetection: resolveToolLoopDetectionConfig({ cfg: resolvedConfig, agentId: hookAgentId }),
   };

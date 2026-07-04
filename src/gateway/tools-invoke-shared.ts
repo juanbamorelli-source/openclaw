@@ -15,6 +15,7 @@ import { logWarn } from "../logger.js";
 import { isTestDefaultMemorySlotDisabled } from "../plugins/config-state.js";
 import { defaultSlotIdForKey } from "../plugins/slots.js";
 import { getPluginToolMeta } from "../plugins/tools.js";
+import { parseRawSessionConversationRef } from "../sessions/session-key-utils.js";
 import { canonicalizeSessionKeyForAgent } from "./session-store-key.js";
 import { resolveGatewayScopedTools } from "./tool-resolution.js";
 
@@ -146,6 +147,20 @@ function resolveToolSource(tool: AnyAgentTool): "core" | "plugin" | "channel" {
   return "core";
 }
 
+function resolveTurnSourceFromSessionKey(sessionKey: string): {
+  messageProvider?: string;
+  currentChannelId?: string;
+} {
+  const parsed = parseRawSessionConversationRef(sessionKey);
+  if (!parsed) {
+    return {};
+  }
+  return {
+    messageProvider: parsed.channel,
+    currentChannelId: `${parsed.kind}:${parsed.rawId}`,
+  };
+}
+
 /** Resolves, authorizes, and invokes one gateway-visible core/plugin/channel tool. */
 export async function invokeGatewayTool(params: {
   cfg: OpenClawConfig;
@@ -249,6 +264,9 @@ export async function invokeGatewayTool(params: {
       action,
       args,
     });
+    const sessionTurnSource = resolveTurnSourceFromSessionKey(sessionKey);
+    const messageProvider = params.messageChannel ?? sessionTurnSource.messageProvider;
+    const currentChannelId = params.agentTo ?? sessionTurnSource.currentChannelId;
     const hookResult = await runBeforeToolCallHook({
       toolName,
       params: toolArgs,
@@ -257,6 +275,8 @@ export async function invokeGatewayTool(params: {
         agentId,
         config: params.cfg,
         sessionKey,
+        ...(messageProvider ? { messageProvider } : {}),
+        ...(currentChannelId ? { channelId: currentChannelId } : {}),
         loopDetection: resolveToolLoopDetectionConfig({ cfg: params.cfg, agentId }),
       },
       approvalMode: params.approvalMode,

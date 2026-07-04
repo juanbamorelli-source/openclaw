@@ -1020,6 +1020,27 @@ describe("tools.invoke Gateway RPC", () => {
     expect(error?.message).toBe("Plugin approval required");
   });
 
+  it("derives approval turn source from channel session keys for RPC tool invokes", async () => {
+    setMainAllowedTools({ allow: ["tools_invoke_test"] });
+    hookMocks.runBeforeToolCallHook.mockResolvedValueOnce({
+      blocked: true,
+      deniedReason: "plugin-approval",
+      reason: "Plugin approval required",
+      params: { mode: "ok" },
+    });
+
+    await invokeToolsRpc({
+      name: "tools_invoke_test",
+      args: { mode: "ok" },
+      sessionKey: "agent:main:discord:channel:1511003260905853239",
+      confirm: true,
+    });
+
+    const hookArg = firstHookCallArg();
+    expect(hookArg.ctx?.messageProvider).toBe("discord");
+    expect(hookArg.ctx?.channelId).toBe("channel:1511003260905853239");
+  });
+
   it("rejects mismatched session and agent scope", async () => {
     cfg = {
       agents: {
