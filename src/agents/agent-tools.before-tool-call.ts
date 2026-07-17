@@ -99,6 +99,9 @@ export type HookContext = {
   sessionId?: string;
   runId?: string;
   trace?: DiagnosticTraceContext;
+  /** Message provider/channel for approval delivery, for example "discord". */
+  messageProvider?: string;
+  /** Current channel/user target for approval delivery, for example "channel:123". */
   channelId?: string;
   loopDetection?: ToolLoopDetectionConfig;
   onToolOutcome?: ToolOutcomeObserver;
@@ -459,6 +462,8 @@ async function requestPluginToolApproval(params: {
         toolCallId: params.toolCallId,
         agentId: params.ctx?.agentId,
         sessionKey: params.ctx?.sessionKey,
+        turnSourceChannel: params.ctx?.messageProvider,
+        turnSourceTo: params.ctx?.channelId,
         timeoutMs,
         twoPhase: true,
       },

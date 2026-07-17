@@ -1353,6 +1353,35 @@ describe("before_tool_call requireApproval handling", () => {
     expect(waitCall[2]).toEqual({ id: "server-id-1" });
   });
 
+  it("forwards turn source fields to plugin approval requests", async () => {
+    hookRunner.runBeforeToolCall.mockResolvedValue({
+      requireApproval: {
+        title: "Sensitive",
+        description: "Sensitive op",
+        pluginId: "sage",
+      },
+    });
+    mockCallGateway.mockResolvedValueOnce({ id: "server-id-source", status: "accepted" });
+    mockCallGateway.mockResolvedValueOnce({ id: "server-id-source", decision: "allow-once" });
+
+    const result = await runBeforeToolCallHook({
+      toolName: "bash",
+      params: { command: "rm -rf" },
+      ctx: {
+        agentId: "main",
+        sessionKey: "agent:main:discord:channel:1511003260905853239",
+        messageProvider: "discord",
+        channelId: "channel:1511003260905853239",
+      },
+    });
+
+    expect(result.blocked).toBe(false);
+    const requestCall = requireGatewayCall(0);
+    const requestParams = requireRecord(requestCall[2], "approval request params");
+    expect(requestParams.turnSourceChannel).toBe("discord");
+    expect(requestParams.turnSourceTo).toBe("channel:1511003260905853239");
+  });
+
   it("caps oversized plugin approval timeouts before calling gateway", async () => {
     hookRunner.runBeforeToolCall.mockResolvedValue({
       requireApproval: {
