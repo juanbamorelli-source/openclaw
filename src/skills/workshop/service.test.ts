@@ -990,7 +990,7 @@ describe("skill workshop proposals", () => {
     expect(proposal.record.scan.state).toBe("failed");
     await expect(
       applySkillProposal({ workspaceDir, proposalId: proposal.record.id }),
-    ).rejects.toThrow("Proposal scan failed");
+    ).rejects.toThrow("was quarantined by the security scan: shell-exec at PROPOSAL.md:");
     expect((await inspectSkillProposal(proposal.record.id))?.record.status).toBe("quarantined");
   });
 
@@ -1013,7 +1013,7 @@ describe("skill workshop proposals", () => {
     );
     await expect(
       applySkillProposal({ workspaceDir, proposalId: proposal.record.id }),
-    ).rejects.toThrow("Proposal scan failed");
+    ).rejects.toThrow("was quarantined by the security scan: prompt-injection-");
     expect((await inspectSkillProposal(proposal.record.id))?.record.status).toBe("quarantined");
     await expect(
       fs.access(path.join(workspaceDir, "skills", "prompt-injection-skill", "SKILL.md")),
@@ -1128,7 +1128,7 @@ describe("skill workshop proposals", () => {
     expect(proposal.record.scan.state).toBe("failed");
     await expect(
       applySkillProposal({ workspaceDir, proposalId: proposal.record.id }),
-    ).rejects.toThrow("Proposal scan failed");
+    ).rejects.toThrow("was quarantined by the security scan: shell-exec at scripts/run.js:");
     expect((await inspectSkillProposal(proposal.record.id))?.record.status).toBe("quarantined");
     await expect(
       fs.access(path.join(workspaceDir, "skills", "unsafe-support", "scripts", "run.js")),
