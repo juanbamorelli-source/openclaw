@@ -579,6 +579,23 @@ describe("POST /tools/invoke", () => {
     expect(body.result?.ok).toBe(true);
   });
 
+  it("derives Discord approval delivery context from a channel session key", async () => {
+    setMainAllowedTools({ allow: ["tools_invoke_test"] });
+
+    const res = await invokeToolAuthed({
+      tool: "tools_invoke_test",
+      args: { mode: "ok" },
+      sessionKey: "agent:main:discord:channel:1511003260905853239",
+    });
+
+    await expectOkInvokeResponse(res);
+    expect(firstHookCallArg().ctx).toMatchObject({
+      sessionKey: "agent:main:discord:channel:1511003260905853239",
+      turnSourceChannel: "discord",
+      turnSourceTo: "channel:1511003260905853239",
+    });
+  });
+
   it("supports tools.alsoAllow in profile and implicit modes", async () => {
     cfg = {
       ...cfg,
