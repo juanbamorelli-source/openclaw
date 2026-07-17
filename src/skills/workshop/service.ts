@@ -523,7 +523,12 @@ export async function applySkillProposal(
         statusReason: "Proposal scan failed.",
       };
       await updateSkillProposalRecord({ record: updated });
-      throw new Error("Proposal scan failed; proposal was quarantined.");
+      const summary = scan.findings
+        .map((finding) => `${finding.ruleId} at ${finding.file}:${finding.line}`)
+        .join(", ");
+      throw new Error(
+        `Skill Workshop proposal ${record.id} was quarantined by the security scan: ${summary}. Inspect the proposal before retrying.`,
+      );
     }
 
     assertInsideWorkspace(input.workspaceDir, record.target.skillFile, "skill file");

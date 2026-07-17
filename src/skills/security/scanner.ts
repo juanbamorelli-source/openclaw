@@ -231,8 +231,9 @@ const SKILL_CONTENT_RULES: SourceRule[] = [
   {
     ruleId: "prompt-injection-system",
     severity: "critical",
-    message: "Skill text references hidden prompt layers",
-    pattern: /\b(system prompt|developer message|hidden instructions)\b/i,
+    message: "Skill text attempts to manipulate hidden prompt layers",
+    pattern:
+      /\b(reveal|show|print|repeat|extract|expose|leak|dump|bypass|override|ignore|follow)\b.{0,80}\b(system prompt|developer message|hidden instructions)\b|\b(system prompt|developer message|hidden instructions)\b.{0,80}\b(reveal|show|print|repeat|extract|expose|leak|dump|bypass|override|ignore)\b/i,
   },
   {
     ruleId: "prompt-injection-tool",
