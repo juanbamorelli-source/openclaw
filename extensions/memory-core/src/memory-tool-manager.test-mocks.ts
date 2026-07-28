@@ -64,6 +64,9 @@ const getMemorySearchManagerMock = vi.fn(
   async (params: { cfg?: unknown; agentId?: string; purpose?: string }) =>
     getManagerImpl ? await getManagerImpl(params) : { manager: stubManager },
 );
+const closeMemorySearchManagerMock = vi.fn(async (_params: { cfg?: unknown; agentId?: string }) => {
+  await stubManager.close();
+});
 const readAgentMemoryFileMock = vi.fn(
   async (params: MemoryReadParams) => await readFileImpl(params),
 );
@@ -78,6 +81,7 @@ vi.mock("./tools.runtime.js", () => ({
     qmd: cfg?.memory?.qmd,
   }),
   getMemorySearchManager: getMemorySearchManagerMock,
+  closeMemorySearchManager: closeMemorySearchManagerMock,
   readAgentMemoryFile: readAgentMemoryFileMock,
 }));
 
@@ -143,6 +147,17 @@ export function getMemorySyncMockCalls(): number {
 
 export function getMemoryCloseMockCalls(): number {
   return stubManager.close.mock.calls.length;
+}
+
+export function getCloseMemorySearchManagerMockCalls(): number {
+  return closeMemorySearchManagerMock.mock.calls.length;
+}
+
+export function getCloseMemorySearchManagerMockParams(): Array<{
+  cfg?: unknown;
+  agentId?: string;
+}> {
+  return closeMemorySearchManagerMock.mock.calls.map(([params]) => params);
 }
 
 export function getMemorySearchManagerMockConfigs(): unknown[] {

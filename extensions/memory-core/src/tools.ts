@@ -240,6 +240,17 @@ function isClosedMemoryStoreError(error: unknown): boolean {
   );
 }
 
+function isRemoteEmbeddingAuthExpiredError(error: unknown): boolean {
+  const message = formatErrorMessage(error).toLowerCase();
+  return (
+    message.includes("embeddings failed") &&
+    (message.includes("token_expired") ||
+      message.includes("invalid bearer") ||
+      message.includes("expired token") ||
+      message.includes("http 401"))
+  );
+}
+
 function buildRecallKey(
   result: Pick<MemorySearchResult, "source" | "path" | "startLine" | "endLine">,
 ): string {
@@ -567,8 +578,15 @@ export function createMemorySearchTool(options: {
                   try {
                     rawResults = await activeMemory.manager.search(query, searchOptions);
                   } catch (error) {
-                    if (!isClosedMemoryStoreError(error)) {
+                    if (
+                      !isClosedMemoryStoreError(error) &&
+                      !isRemoteEmbeddingAuthExpiredError(error)
+                    ) {
                       throw error;
+                    }
+                    if (isRemoteEmbeddingAuthExpiredError(error)) {
+                      const { closeMemorySearchManager } = await loadMemoryToolRuntime();
+                      await closeMemorySearchManager({ cfg, agentId });
                     }
                     const refreshed = trackMemoryManager(
                       await getMemoryManagerContextWithPurpose({
