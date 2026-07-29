@@ -445,6 +445,7 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
     expect(approvalCall.request.allowedDecisions).toEqual(["allow-once", "deny"]);
     expect(approvalCall.request.timeoutMs).toBe(300_000);
     expect(approvalCall.request.replayLateDecision).toBe(true);
+    expect(approvalCall.request.deferUntilRetry).toBeUndefined();
     expect(approvalCall.timeoutParams.timeoutMs).toBe(310_000);
     expect(approvalCall.request.toolName).toBe("skill_workshop");
     expect(approvalCall.request.toolCallId).toBe("call-skill-apply");
@@ -491,14 +492,11 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
     }
   });
 
-  it("returns an actionable pending outcome when skill_workshop approval expires", async () => {
+  it("returns an actionable pending outcome when skill_workshop approval is registered", async () => {
     mockCallGatewayTool.mockResolvedValueOnce({
-      id: "skill-workshop-timeout",
+      id: "skill-workshop-pending",
       status: "accepted",
-    });
-    mockCallGatewayTool.mockResolvedValueOnce({
-      id: "skill-workshop-timeout",
-      decision: null,
+      deliveryRoute: "turn-source",
     });
 
     const result = await runBeforeToolCallHook({
@@ -513,8 +511,9 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
       kind: "veto",
       deniedReason: "plugin-approval",
       reason:
-        "The Skill Workshop approval request expired without a decision. This lifecycle call left the proposal unchanged and pending; check its current status in case another operator acted on it. If you approved after the tool call ended, retry the same lifecycle action once; the prior decision can be consumed without asking again. You can also decide in the Skill Workshop UI or run `openclaw skills workshop apply|reject|quarantine <id>`.",
+        "Skill Workshop approval is pending. The proposal is unchanged until you approve or deny this request. After approval, retry the same lifecycle action once; the prior decision can be consumed without asking again.",
     });
+    expect(mockCallGatewayTool).toHaveBeenCalledTimes(1);
   });
 
   it("runs trusted policies before skill_workshop lifecycle approval", async () => {

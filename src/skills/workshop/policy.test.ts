@@ -49,6 +49,7 @@ describe("resolveSkillWorkshopToolApproval", () => {
       timeoutMs: 300_000,
       allowedDecisions: ["allow-once", "deny"],
       replayLateDecision: true,
+      deferUntilRetry: true,
     });
     expect(result?.requireApproval?.description).toContain(`Proposal ID: ${proposal.record.id}`);
     expect(result?.requireApproval?.description).toContain("Target skill: Weather Helper");
@@ -59,6 +60,9 @@ describe("resolveSkillWorkshopToolApproval", () => {
     );
     expect(result?.requireApproval?.timeoutReason).toContain(
       `left Proposal ${proposal.record.id} unchanged and pending`,
+    );
+    expect(result?.requireApproval?.pendingReason).toContain(
+      `Proposal ${proposal.record.id} is unchanged until you approve or deny this request`,
     );
     const resolvedByName = await resolveSkillWorkshopToolApproval({
       toolName: "skill_workshop",
@@ -139,6 +143,7 @@ describe("resolveSkillWorkshopToolApproval", () => {
     );
     expect(result?.requireApproval?.timeoutMs).toBe(300_000);
     expect(result?.requireApproval?.replayLateDecision).toBe(true);
+    expect(result?.requireApproval?.deferUntilRetry).toBe(true);
 
     const withoutWorkspace = await resolveSkillWorkshopToolApproval({
       toolName: "skill_workshop",

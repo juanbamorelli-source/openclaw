@@ -141,6 +141,15 @@ function lifecycleApprovalTimeoutReason(proposalId?: string): string {
   ].join(" ");
 }
 
+function lifecycleApprovalPendingReason(proposalId?: string): string {
+  const proposal = proposalId ? `Proposal ${proposalId}` : "The proposal";
+  return [
+    "Skill Workshop approval is pending.",
+    `${proposal} is unchanged until you approve or deny this request.`,
+    "After approval, retry the same lifecycle action once; the prior decision can be consumed without asking again.",
+  ].join(" ");
+}
+
 /** Returns approval policy for skill workshop lifecycle tool calls. */
 export async function resolveSkillWorkshopToolApproval(params: {
   toolName: string;
@@ -171,8 +180,10 @@ export async function resolveSkillWorkshopToolApproval(params: {
       description: approvalDescription.description,
       timeoutMs: SKILL_WORKSHOP_APPROVAL_TIMEOUT_MS,
       timeoutReason: lifecycleApprovalTimeoutReason(approvalDescription.proposalId),
+      pendingReason: lifecycleApprovalPendingReason(approvalDescription.proposalId),
       allowedDecisions: ["allow-once", "deny"],
       replayLateDecision: true,
+      deferUntilRetry: true,
     },
   };
 }

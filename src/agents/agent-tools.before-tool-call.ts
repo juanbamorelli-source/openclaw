@@ -1030,6 +1030,16 @@ async function requestPluginToolApproval(params: {
           params: params.baseParams,
         };
       }
+    } else if (approval.deferUntilRetry === true) {
+      return {
+        blocked: true,
+        kind: "veto",
+        deniedReason: "plugin-approval",
+        reason:
+          approval.pendingReason ??
+          "Plugin approval is pending. Approve or deny the request, then retry the same action.",
+        params: params.baseParams,
+      };
     } else {
       // Wait for the decision, but abort early if the agent run is cancelled
       // so the user isn't blocked for the full approval timeout.

@@ -2,6 +2,12 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.7.1-5
+
+### Fixes
+
+- **Skill Workshop approvals:** register lifecycle approval prompts immediately and return an actionable pending/retry result instead of waiting past Codex's dynamic-tool watchdog; the next identical retry can consume the approve/deny decision.
+
 ## 2026.7.1-4
 
 ### Fixes

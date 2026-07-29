@@ -21,6 +21,8 @@ export type PluginHookBeforeToolCallResult = {
     timeoutBehavior?: "allow" | "deny";
     /** Override timeout text and return the timeout as a blocked tool result. */
     timeoutReason?: string;
+    /** Return this text when the approval is registered and this tool call must be retried. */
+    pendingReason?: string;
     allowedDecisions?: Array<"allow-once" | "allow-always" | "deny">;
     /**
      * Let a later identical approval request consume a resolved decision.
@@ -28,6 +30,8 @@ export type PluginHookBeforeToolCallResult = {
      * call that created it.
      */
     replayLateDecision?: boolean;
+    /** Register the approval prompt, then block this call so a later retry consumes the decision. */
+    deferUntilRetry?: boolean;
     pluginId?: string;
     onResolution?: (decision: PluginApprovalResolution) => Promise<void> | void;
   };
