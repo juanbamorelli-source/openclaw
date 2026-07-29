@@ -9,8 +9,9 @@ import type {
 } from "../infra/exec-approvals.js";
 import { resolveTimerTimeoutMs } from "../shared/number-coercion.js";
 
-// Grace period to keep resolved entries for late awaitDecision calls
+// Grace period to keep resolved entries for late awaitDecision calls.
 const RESOLVED_ENTRY_GRACE_MS = 15_000;
+const MAX_RESOLVED_ENTRY_GRACE_MS = 600_000;
 
 function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
   const unref = (timer as { unref?: () => void }).unref;
@@ -19,10 +20,16 @@ function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
   }
 }
 
-function scheduleResolvedEntryCleanup(cleanup: () => void): void {
+function resolveResolvedEntryGraceMs(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.min(MAX_RESOLVED_ENTRY_GRACE_MS, Math.floor(value))
+    : RESOLVED_ENTRY_GRACE_MS;
+}
+
+function scheduleResolvedEntryCleanup(cleanup: () => void, graceMs?: number): void {
   // Resolved approvals stay visible briefly so node.invoke sanitizers can
   // consume a just-approved id after the UI decision races the command retry.
-  const timer = setTimeout(cleanup, RESOLVED_ENTRY_GRACE_MS);
+  const timer = setTimeout(cleanup, resolveResolvedEntryGraceMs(graceMs));
   unrefTimer(timer);
 }
 
@@ -47,6 +54,7 @@ export type ExecApprovalRecord<TPayload = ExecApprovalRequestPayload> = {
   decision?: ExecApprovalDecision;
   consumedDecision?: ExecApprovalDecision;
   resolvedBy?: string | null;
+  resolvedEntryGraceMs?: number;
 };
 
 type PendingEntry<TPayload = ExecApprovalRequestPayload> = {
@@ -143,7 +151,7 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
       if (this.pending.get(recordId) === pending) {
         this.pending.delete(recordId);
       }
-    });
+    }, pending.record.resolvedEntryGraceMs);
     return true;
   }
 
@@ -164,7 +172,7 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
       if (this.pending.get(recordId) === pending) {
         this.pending.delete(recordId);
       }
-    });
+    }, pending.record.resolvedEntryGraceMs);
     return true;
   }
 
@@ -193,6 +201,25 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
     record.consumedDecision = record.decision;
     record.decision = undefined;
     return true;
+  }
+
+  consumeResolvedDecisionMatching(
+    filter: (record: ExecApprovalRecord<TPayload>) => boolean,
+  ): { id: string; decision: ExecApprovalDecision; record: ExecApprovalRecord<TPayload> } | null {
+    for (const [id, entry] of this.pending.entries()) {
+      const record = entry.record;
+      if (record.resolvedAtMs === undefined || record.decision === undefined) {
+        continue;
+      }
+      if (!filter(record)) {
+        continue;
+      }
+      const decision = record.decision;
+      record.consumedDecision = decision;
+      record.decision = undefined;
+      return { id, decision, record };
+    }
+    return null;
   }
 
   /**

@@ -569,6 +569,93 @@ describe("createPluginApprovalHandlers", () => {
       manager.resolve(approvalId, "deny");
       await requestPromise;
     });
+
+    it("replays a late identical lifecycle decision once", async () => {
+      const handlers = createPluginApprovalHandlers(manager);
+      const lifecycleRequest = {
+        title: "Apply workspace skill proposal",
+        description: "Proposal ID: weather-20260729-a1b2c3d4e5",
+        severity: "warning",
+        toolName: "skill_workshop",
+        agentId: "main",
+        sessionKey: "agent:main:discord:channel:1494388343671226538",
+        turnSourceChannel: "discord",
+        turnSourceTo: "channel:1494388343671226538",
+        turnSourceAccountId: "default",
+        timeoutMs: 300_000,
+        twoPhase: true,
+        replayLateDecision: true,
+        allowedDecisions: ["allow-once", "deny"],
+      };
+      const firstRespond = vi.fn();
+      const firstOpts = createMockOptions("plugin.approval.request", lifecycleRequest, {
+        respond: firstRespond,
+      });
+
+      const firstPromise = handlers["plugin.approval.request"](firstOpts);
+      const approvalId = await waitForAcceptedApproval(firstRespond);
+      expect(manager.getSnapshot(approvalId)?.resolvedEntryGraceMs).toBe(300_000);
+      manager.resolve(approvalId, "allow-once");
+      await firstPromise;
+
+      const replayRespond = vi.fn();
+      await handlers["plugin.approval.request"](
+        createMockOptions("plugin.approval.request", lifecycleRequest, {
+          respond: replayRespond,
+        }),
+      );
+      expect(expectResponseOk(replayRespond)).toMatchObject({
+        id: approvalId,
+        decision: "allow-once",
+        replayed: true,
+      });
+
+      const secondRespond = vi.fn();
+      const secondPromise = handlers["plugin.approval.request"](
+        createMockOptions("plugin.approval.request", lifecycleRequest, {
+          respond: secondRespond,
+        }),
+      );
+      const secondApprovalId = await waitForAcceptedApproval(secondRespond);
+      expect(secondApprovalId).not.toBe(approvalId);
+      manager.resolve(secondApprovalId, "deny");
+      await secondPromise;
+    });
+
+    it("does not replay late decisions unless the caller opts in", async () => {
+      const handlers = createPluginApprovalHandlers(manager);
+      const request = {
+        title: "Apply workspace skill proposal",
+        description: "Proposal ID: weather-20260729-a1b2c3d4e5",
+        toolName: "skill_workshop",
+        timeoutMs: 300_000,
+        twoPhase: true,
+        allowedDecisions: ["allow-once", "deny"],
+      };
+      const firstRespond = vi.fn();
+      const firstPromise = handlers["plugin.approval.request"](
+        createMockOptions(
+          "plugin.approval.request",
+          {
+            ...request,
+            replayLateDecision: true,
+          },
+          { respond: firstRespond },
+        ),
+      );
+      const approvalId = await waitForAcceptedApproval(firstRespond);
+      manager.resolve(approvalId, "allow-once");
+      await firstPromise;
+
+      const secondRespond = vi.fn();
+      const secondPromise = handlers["plugin.approval.request"](
+        createMockOptions("plugin.approval.request", request, { respond: secondRespond }),
+      );
+      const secondApprovalId = await waitForAcceptedApproval(secondRespond);
+      expect(secondApprovalId).not.toBe(approvalId);
+      manager.resolve(secondApprovalId, "deny");
+      await secondPromise;
+    });
   });
 
   describe("plugin.approval.list", () => {

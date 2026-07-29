@@ -6,6 +6,7 @@ describe("plugin approval protocol validators", () => {
     const request = {
       title: "Apply workspace skill proposal",
       description: "d".repeat(512),
+      replayLateDecision: true,
     };
 
     expect(validatePluginApprovalRequestParams(request)).toBe(true);

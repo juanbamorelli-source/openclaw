@@ -63,6 +63,40 @@ describe("ExecApprovalManager", () => {
     expect(cleanupTimer?.handle.unref).toHaveBeenCalledTimes(1);
   });
 
+  it("honors per-record resolved cleanup grace for replayable approvals", async () => {
+    const timers = installTimerMocks();
+    const manager = new ExecApprovalManager();
+    const record = manager.create({ command: "echo ok" }, 60_000, "approval-replay");
+    record.resolvedEntryGraceMs = 300_000;
+    const decisionPromise = manager.register(record, 60_000);
+
+    expect(manager.resolve("approval-replay", "allow-once")).toBe(true);
+    await expect(decisionPromise).resolves.toBe("allow-once");
+
+    const cleanupTimer = timers.find((timer) => timer.delay === 300_000);
+    expect(cleanupTimer?.handle.unref).toHaveBeenCalledTimes(1);
+  });
+
+  it("consumes matching resolved decisions exactly once", async () => {
+    const manager = new ExecApprovalManager();
+    const record = manager.create({ command: "echo ok" }, 60_000, "approval-consume");
+    const decisionPromise = manager.register(record, 60_000);
+
+    expect(manager.resolve("approval-consume", "allow-once")).toBe(true);
+    await expect(decisionPromise).resolves.toBe("allow-once");
+
+    expect(
+      manager.consumeResolvedDecisionMatching((candidate) => candidate.id === "approval-consume"),
+    ).toMatchObject({
+      id: "approval-consume",
+      decision: "allow-once",
+    });
+    expect(
+      manager.consumeResolvedDecisionMatching((candidate) => candidate.id === "approval-consume"),
+    ).toBeNull();
+    expect(manager.getSnapshot("approval-consume")?.consumedDecision).toBe("allow-once");
+  });
+
   it("clamps oversized approval timers instead of letting Node fire them immediately", () => {
     const timers = installTimerMocks();
     vi.spyOn(Date, "now").mockReturnValue(1_000);

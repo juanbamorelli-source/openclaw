@@ -22,6 +22,12 @@ export type PluginHookBeforeToolCallResult = {
     /** Override timeout text and return the timeout as a blocked tool result. */
     timeoutReason?: string;
     allowedDecisions?: Array<"allow-once" | "allow-always" | "deny">;
+    /**
+     * Let a later identical approval request consume a resolved decision.
+     * Use for lifecycle tools whose visible approval may outlive the agent/tool
+     * call that created it.
+     */
+    replayLateDecision?: boolean;
     pluginId?: string;
     onResolution?: (decision: PluginApprovalResolution) => Promise<void> | void;
   };

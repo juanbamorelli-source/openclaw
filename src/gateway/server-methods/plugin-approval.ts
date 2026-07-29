@@ -22,6 +22,7 @@ import {
   handleApprovalResolve,
   handleApprovalWaitDecision,
   handlePendingApprovalRequest,
+  isApprovalRecordVisibleToClient,
   listVisiblePendingApprovalRequests,
   registerPendingApprovalRecord,
   resolveApprovalDecisionParams,
@@ -68,8 +69,10 @@ export function createPluginApprovalHandlers(
         turnSourceThreadId?: string | number | null;
         timeoutMs?: number;
         twoPhase?: boolean;
+        replayLateDecision?: boolean;
       };
       const twoPhase = p.twoPhase === true;
+      const replayLateDecision = p.replayLateDecision === true;
       const timeoutMs = resolvePluginApprovalTimeoutMs(p.timeoutMs);
 
       const normalizeTrimmedString = (value?: string | null): string | null =>
@@ -97,9 +100,42 @@ export function createPluginApprovalHandlers(
         turnSourceThreadId: p.turnSourceThreadId ?? null,
       };
 
+      if (replayLateDecision) {
+        const consumed = manager.consumeResolvedDecisionMatching((record) => {
+          const decision = record.decision;
+          if (
+            !decision ||
+            !resolvePluginApprovalRequestAllowedDecisions(request).includes(decision)
+          ) {
+            return false;
+          }
+          return (
+            isApprovalRecordVisibleToClient({ record, client }) &&
+            pluginApprovalRequestsMatchForReplay(record.request, request)
+          );
+        });
+        if (consumed) {
+          respond(
+            true,
+            {
+              id: consumed.id,
+              decision: consumed.decision,
+              replayed: true,
+              createdAtMs: consumed.record.createdAtMs,
+              expiresAtMs: consumed.record.expiresAtMs,
+            },
+            undefined,
+          );
+          return;
+        }
+      }
+
       // Always server-generate the ID — never accept plugin-provided IDs.
       // Kind-prefix so /approve routing can distinguish plugin vs exec IDs deterministically.
       const record = manager.create(request, timeoutMs, `plugin:${randomUUID()}`);
+      if (replayLateDecision) {
+        record.resolvedEntryGraceMs = timeoutMs;
+      }
       bindApprovalRequesterMetadata({ record, client });
       if (client?.internal?.approvalRuntime === true) {
         bindApprovalReviewerDeviceIds({
@@ -204,4 +240,39 @@ export function createPluginApprovalHandlers(
       });
     },
   };
+}
+
+function normalizeReplayField(value: unknown): string {
+  return normalizeOptionalString(value) ?? "";
+}
+
+function normalizeReplayThreadId(value: unknown): string {
+  return value === null || value === undefined ? "" : String(value);
+}
+
+function replayAllowedDecisionsKey(request: PluginApprovalRequestPayload): string {
+  return resolvePluginApprovalRequestAllowedDecisions(request).join("|");
+}
+
+function pluginApprovalRequestsMatchForReplay(
+  previous: PluginApprovalRequestPayload,
+  next: PluginApprovalRequestPayload,
+): boolean {
+  return (
+    normalizeReplayField(previous.pluginId) === normalizeReplayField(next.pluginId) &&
+    previous.title === next.title &&
+    previous.description === next.description &&
+    normalizeReplayField(previous.severity) === normalizeReplayField(next.severity) &&
+    normalizeReplayField(previous.toolName) === normalizeReplayField(next.toolName) &&
+    normalizeReplayField(previous.agentId) === normalizeReplayField(next.agentId) &&
+    normalizeReplayField(previous.sessionKey) === normalizeReplayField(next.sessionKey) &&
+    normalizeReplayField(previous.turnSourceChannel) ===
+      normalizeReplayField(next.turnSourceChannel) &&
+    normalizeReplayField(previous.turnSourceTo) === normalizeReplayField(next.turnSourceTo) &&
+    normalizeReplayField(previous.turnSourceAccountId) ===
+      normalizeReplayField(next.turnSourceAccountId) &&
+    normalizeReplayThreadId(previous.turnSourceThreadId) ===
+      normalizeReplayThreadId(next.turnSourceThreadId) &&
+    replayAllowedDecisionsKey(previous) === replayAllowedDecisionsKey(next)
+  );
 }

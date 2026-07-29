@@ -995,6 +995,7 @@ async function requestPluginToolApproval(params: {
         turnSourceThreadId: params.ctx?.turnSourceThreadId,
         timeoutMs,
         twoPhase: true,
+        replayLateDecision: approval.replayLateDecision === true,
       },
       { expectFinal: false },
     );

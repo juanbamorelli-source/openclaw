@@ -46,8 +46,9 @@ describe("resolveSkillWorkshopToolApproval", () => {
     expect(result?.requireApproval).toMatchObject({
       title: "Apply workspace skill proposal",
       severity: "warning",
-      timeoutMs: 70_000,
+      timeoutMs: 300_000,
       allowedDecisions: ["allow-once", "deny"],
+      replayLateDecision: true,
     });
     expect(result?.requireApproval?.description).toContain(`Proposal ID: ${proposal.record.id}`);
     expect(result?.requireApproval?.description).toContain("Target skill: Weather Helper");
@@ -136,7 +137,8 @@ describe("resolveSkillWorkshopToolApproval", () => {
     expect(result?.requireApproval?.description).toBe(
       "Apply a pending workspace skill proposal into live workspace skills.",
     );
-    expect(result?.requireApproval?.timeoutMs).toBe(70_000);
+    expect(result?.requireApproval?.timeoutMs).toBe(300_000);
+    expect(result?.requireApproval?.replayLateDecision).toBe(true);
 
     const withoutWorkspace = await resolveSkillWorkshopToolApproval({
       toolName: "skill_workshop",

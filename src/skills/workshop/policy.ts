@@ -7,9 +7,10 @@ import { resolveSkillWorkshopConfig } from "./config.js";
 import { resolvePendingSkillProposal } from "./service.js";
 
 const SKILL_WORKSHOP_LIFECYCLE_ACTIONS = new Set(["apply", "reject", "quarantine"]);
-// Codex dynamic tools have a 90s watchdog. Approval RPCs reserve another 10s
-// for Gateway cleanup, leaving 10s for proposal lookup and tool-call overhead.
-const SKILL_WORKSHOP_APPROVAL_TIMEOUT_MS = 70_000;
+// Skill Workshop prompts need a human-sized window. The tool caller may time out
+// sooner; replayLateDecision lets the next identical lifecycle retry consume the
+// exact approved/denied decision instead of orphaning it.
+const SKILL_WORKSHOP_APPROVAL_TIMEOUT_MS = 300_000;
 
 type SkillWorkshopLifecycleAction = "apply" | "reject" | "quarantine";
 
@@ -135,8 +136,8 @@ function lifecycleApprovalTimeoutReason(proposalId?: string): string {
   return [
     "The Skill Workshop approval request expired without a decision.",
     `This lifecycle call left ${proposal} unchanged and pending; check its current status in case another operator acted on it.`,
-    "Decide in the Skill Workshop UI or run `openclaw skills workshop apply|reject|quarantine <id>`.",
-    "Do not retry this tool call in a loop.",
+    "If you approved after the tool call ended, retry the same lifecycle action once; the prior decision can be consumed without asking again.",
+    "You can also decide in the Skill Workshop UI or run `openclaw skills workshop apply|reject|quarantine <id>`.",
   ].join(" ");
 }
 
@@ -171,6 +172,7 @@ export async function resolveSkillWorkshopToolApproval(params: {
       timeoutMs: SKILL_WORKSHOP_APPROVAL_TIMEOUT_MS,
       timeoutReason: lifecycleApprovalTimeoutReason(approvalDescription.proposalId),
       allowedDecisions: ["allow-once", "deny"],
+      replayLateDecision: true,
     },
   };
 }
