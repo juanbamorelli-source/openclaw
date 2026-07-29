@@ -2,6 +2,12 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.7.1-4
+
+### Fixes
+
+- **Skill Workshop approvals:** replay one exact late lifecycle approval on the next identical apply/reject/quarantine retry, and keep prompts open long enough for human review.
+
 ## 2026.7.1-2
 
 ### Fixes
