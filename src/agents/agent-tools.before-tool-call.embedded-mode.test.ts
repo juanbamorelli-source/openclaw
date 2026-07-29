@@ -139,12 +139,17 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
         allowedDecisions: undefined,
         description: "Test approval request",
         pluginId: "test-plugin",
+        replayLateDecision: false,
         sessionKey: undefined,
         severity: "info",
         timeoutMs: 120_000,
         title: "Needs approval",
         toolCallId: "call-1",
         toolName: "exec",
+        turnSourceAccountId: undefined,
+        turnSourceChannel: undefined,
+        turnSourceThreadId: undefined,
+        turnSourceTo: undefined,
         twoPhase: true,
       },
       { expectFinal: false },
@@ -438,8 +443,9 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
     );
     expect(approvalCall.request.severity).toBe("warning");
     expect(approvalCall.request.allowedDecisions).toEqual(["allow-once", "deny"]);
-    expect(approvalCall.request.timeoutMs).toBe(70_000);
-    expect(approvalCall.timeoutParams.timeoutMs).toBe(80_000);
+    expect(approvalCall.request.timeoutMs).toBe(300_000);
+    expect(approvalCall.request.replayLateDecision).toBe(true);
+    expect(approvalCall.timeoutParams.timeoutMs).toBe(310_000);
     expect(approvalCall.request.toolName).toBe("skill_workshop");
     expect(approvalCall.request.toolCallId).toBe("call-skill-apply");
     expect(runBeforeToolCallMock).toHaveBeenCalledTimes(1);
@@ -507,7 +513,7 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
       kind: "veto",
       deniedReason: "plugin-approval",
       reason:
-        "The Skill Workshop approval request expired without a decision. This lifecycle call left the proposal unchanged and pending; check its current status in case another operator acted on it. Decide in the Skill Workshop UI or run `openclaw skills workshop apply|reject|quarantine <id>`. Do not retry this tool call in a loop.",
+        "The Skill Workshop approval request expired without a decision. This lifecycle call left the proposal unchanged and pending; check its current status in case another operator acted on it. If you approved after the tool call ended, retry the same lifecycle action once; the prior decision can be consumed without asking again. You can also decide in the Skill Workshop UI or run `openclaw skills workshop apply|reject|quarantine <id>`.",
     });
   });
 

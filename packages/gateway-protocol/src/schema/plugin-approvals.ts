@@ -42,6 +42,7 @@ export const PluginApprovalRequestParamsSchema = Type.Object(
     turnSourceThreadId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
     timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_PLUGIN_APPROVAL_TIMEOUT_MS })),
     twoPhase: Type.Optional(Type.Boolean()),
+    replayLateDecision: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );
