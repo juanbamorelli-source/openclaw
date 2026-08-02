@@ -8,12 +8,16 @@ const applySkillProposalMock = vi.hoisted(() => vi.fn());
 const listSkillProposalsMock = vi.hoisted(() => vi.fn());
 const quarantineSkillProposalMock = vi.hoisted(() => vi.fn());
 const rejectSkillProposalMock = vi.hoisted(() => vi.fn());
+const retireWorkspaceSkillMock = vi.hoisted(() => vi.fn());
+const restoreWorkspaceSkillMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../../skills/workshop/service.js", () => ({
   applySkillProposal: applySkillProposalMock,
   listSkillProposals: listSkillProposalsMock,
   quarantineSkillProposal: quarantineSkillProposalMock,
   rejectSkillProposal: rejectSkillProposalMock,
+  retireWorkspaceSkill: retireWorkspaceSkillMock,
+  restoreWorkspaceSkill: restoreWorkspaceSkillMock,
 }));
 
 function ownerParams(commandBody: string) {
@@ -43,6 +47,8 @@ beforeEach(() => {
   listSkillProposalsMock.mockReset();
   quarantineSkillProposalMock.mockReset();
   rejectSkillProposalMock.mockReset();
+  retireWorkspaceSkillMock.mockReset();
+  restoreWorkspaceSkillMock.mockReset();
 });
 
 describe("handleSkillWorkshopCommand", () => {
@@ -83,6 +89,20 @@ describe("handleSkillWorkshopCommand", () => {
     expect(applySkillProposalMock).not.toHaveBeenCalled();
   });
 
+  it("preserves an existing user-invocable skill command named retire", async () => {
+    const params = ownerParams("/skill retire weather-helper");
+    params.skillCommands = [
+      {
+        name: "retire",
+        skillName: "retire",
+        description: "Existing user skill",
+      } satisfies SkillCommandSpec,
+    ];
+
+    await expect(handleSkillWorkshopCommand(params, true)).resolves.toBeNull();
+    expect(retireWorkspaceSkillMock).not.toHaveBeenCalled();
+  });
+
   it("leaves ordinary owner skill commands on the existing skill path", async () => {
     const params = ownerParams("/skill weather-helper forecast");
     params.skillCommands = [
@@ -119,6 +139,37 @@ describe("handleSkillWorkshopCommand", () => {
       reason: "no longer needed",
     });
     expect(applySkillProposalMock).not.toHaveBeenCalled();
+  });
+
+  it("retires and restores an owner's exact workspace skill without a model handoff", async () => {
+    retireWorkspaceSkillMock.mockReturnValue({ skillKey: "weather-helper" });
+    restoreWorkspaceSkillMock.mockReturnValue({ skillKey: "weather-helper" });
+
+    await expect(
+      handleSkillWorkshopCommand(ownerParams("/skill retire weather-helper"), true),
+    ).resolves.toEqual({
+      shouldContinue: false,
+      reply: {
+        text: "✅ Retired weather-helper. Use /skill restore weather-helper to restore it.",
+      },
+    });
+    expect(retireWorkspaceSkillMock).toHaveBeenCalledWith({
+      workspaceDir: "/tmp/workshop-owner-command",
+      config: baseCommandTestConfig,
+      skillName: "weather-helper",
+    });
+
+    await expect(
+      handleSkillWorkshopCommand(ownerParams("/skill restore weather-helper"), true),
+    ).resolves.toEqual({
+      shouldContinue: false,
+      reply: { text: "✅ Restored weather-helper." },
+    });
+    expect(restoreWorkspaceSkillMock).toHaveBeenCalledWith({
+      workspaceDir: "/tmp/workshop-owner-command",
+      config: baseCommandTestConfig,
+      skillName: "weather-helper",
+    });
   });
 
   it("lists only matching proposals without falling through to an agent turn", async () => {

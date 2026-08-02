@@ -570,6 +570,97 @@ function updateLifecyclePin(skill: string, pinned: boolean, options: OpenClawSta
   return getSkillCuratorStatus(options).skills.find((entry) => entry.skillFile === firstSkillFile)!;
 }
 
+type WorkspaceSkillLifecycleInput = {
+  skillName: string;
+  skillFile: string;
+  reason?: string;
+};
+
+function updateWorkspaceSkillLifecycle(
+  input: WorkspaceSkillLifecycleInput,
+  state: "active" | "archived",
+  options: CuratorOptions,
+) {
+  const skillFile = canonicalizePath(path.resolve(input.skillFile));
+  if (!fs.existsSync(skillFile)) {
+    throw new Error(`Workspace skill file is missing: ${skillFile}`);
+  }
+  const skillKey = canonicalSkillKey(input.skillName);
+  const nowMs = options.nowMs ?? Date.now();
+  const archivedReason = state === "archived" ? input.reason?.trim() || "retired by owner" : null;
+  const result = runOpenClawStateWriteTransaction(({ db }) => {
+    const kysely = getNodeSqliteKysely<CuratorDatabase>(db);
+    const existing = executeSqliteQueryTakeFirstSync(
+      db,
+      kysely
+        .selectFrom("skill_lifecycle")
+        .select(["state", "state_changed_at_ms"])
+        .where("skill_file", "=", skillFile),
+    );
+    if (state === "active" && existing?.state !== "archived") {
+      return false;
+    }
+    if (!existing) {
+      executeSqliteQuerySync(
+        db,
+        kysely.insertInto("skill_lifecycle").values({
+          skill_key: skillKey,
+          skill_name: input.skillName,
+          skill_file: skillFile,
+          state,
+          pinned: 0,
+          state_changed_at_ms: nowMs,
+          created_at_ms: nowMs,
+          archived_reason: archivedReason,
+        }),
+      );
+      return true;
+    }
+    executeSqliteQuerySync(
+      db,
+      kysely
+        .updateTable("skill_lifecycle")
+        .set({
+          skill_key: skillKey,
+          skill_name: input.skillName,
+          state,
+          state_changed_at_ms: existing.state === state ? existing.state_changed_at_ms : nowMs,
+          archived_reason: archivedReason,
+        })
+        .where("skill_file", "=", skillFile),
+    );
+    return true;
+  }, options);
+  if (!result) {
+    throw new Error(`Archived workspace skill not found: ${input.skillName}`);
+  }
+  const lifecycle = getSkillCuratorStatus(options).skills.find(
+    (entry) => entry.skillFile === skillFile,
+  );
+  if (!lifecycle) {
+    throw new Error(`Workspace skill lifecycle was not persisted: ${input.skillName}`);
+  }
+  return lifecycle;
+}
+
+/**
+ * Retiring a workspace skill changes only its snapshot lifecycle state. The skill files stay in
+ * place, so recovery is an exact state transition instead of a destructive filesystem write.
+ */
+export function retireWorkspaceSkill(
+  input: WorkspaceSkillLifecycleInput,
+  options: CuratorOptions = {},
+) {
+  return updateWorkspaceSkillLifecycle(input, "archived", options);
+}
+
+export function restoreWorkspaceSkill(
+  input: Omit<WorkspaceSkillLifecycleInput, "reason">,
+  options: CuratorOptions = {},
+) {
+  return updateWorkspaceSkillLifecycle(input, "active", options);
+}
+
 export function pinCuratedSkill(skill: string, options: OpenClawStateDatabaseOptions = {}) {
   return updateLifecyclePin(skill, true, options);
 }

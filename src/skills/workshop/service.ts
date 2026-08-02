@@ -23,6 +23,10 @@ import { bumpSkillsSnapshotVersion } from "../runtime/refresh-state.js";
 import { scanSkillContent, scanSource } from "../security/scanner.js";
 import { resolveSkillWorkshopConfig, type SkillWorkshopConfig } from "./config.js";
 import {
+  retireWorkspaceSkill as retireWorkspaceSkillLifecycle,
+  restoreWorkspaceSkill as restoreWorkspaceSkillLifecycle,
+} from "./curator.js";
+import {
   readProposalFrontmatter,
   renderProposalMarkdown,
   stripProposalFrontmatterForSkill,
@@ -336,6 +340,59 @@ export function listWritableWorkspaceSkillSummaries(
     );
   }
   return summaries;
+}
+
+type WorkspaceSkillLifecycleActionInput = {
+  workspaceDir: string;
+  config?: OpenClawConfig;
+  agentId?: string;
+  skillName: string;
+};
+
+function resolveWritableWorkspaceSkill(
+  input: WorkspaceSkillLifecycleActionInput,
+): SkillStatusEntry {
+  const skillName = normalizeRequired(input.skillName, "Skill name");
+  const status = buildWorkspaceSkillStatus(input.workspaceDir, {
+    config: input.config,
+    agentId: input.agentId,
+  });
+  const skill = resolveSkillStatusEntry(status.skills, skillName);
+  if (!skill) {
+    throw new Error(`Skill not found: ${skillName}`);
+  }
+  assertWritableSkillTarget(input.workspaceDir, skill);
+  return skill;
+}
+
+/** Retire a writable skill by changing only its reversible snapshot lifecycle state. */
+export function retireWorkspaceSkill(input: WorkspaceSkillLifecycleActionInput) {
+  const skill = resolveWritableWorkspaceSkill(input);
+  const retired = retireWorkspaceSkillLifecycle({
+    skillName: skill.name,
+    skillFile: skill.filePath,
+  });
+  bumpSkillsSnapshotVersion({
+    workspaceDir: input.workspaceDir,
+    reason: "workshop",
+    changedPath: skill.filePath,
+  });
+  return retired;
+}
+
+/** Restore a previously retired writable skill without rewriting its files. */
+export function restoreWorkspaceSkill(input: WorkspaceSkillLifecycleActionInput) {
+  const skill = resolveWritableWorkspaceSkill(input);
+  const restored = restoreWorkspaceSkillLifecycle({
+    skillName: skill.name,
+    skillFile: skill.filePath,
+  });
+  bumpSkillsSnapshotVersion({
+    workspaceDir: input.workspaceDir,
+    reason: "workshop",
+    changedPath: skill.filePath,
+  });
+  return restored;
 }
 
 export async function proposeUpdateSkill(

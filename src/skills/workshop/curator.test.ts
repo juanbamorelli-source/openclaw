@@ -41,7 +41,9 @@ import {
   pinCuratedSkill,
   recordSkillUsage,
   registerSkillUsageTracking,
+  retireWorkspaceSkill,
   restoreCuratedSkill,
+  restoreWorkspaceSkill,
   runSkillCuratorSweep,
   unpinCuratedSkill,
 } from "./curator.js";
@@ -550,5 +552,45 @@ describe("skill curator lifecycle", () => {
     }).map((entry) => entry.skill.name);
     expect(commandSkillNames).toContain("Stale Skill");
     expect(commandSkillNames).not.toContain("Archived Skill");
+  });
+
+  it("retires and restores a manually authored workspace skill by its exact file", () => {
+    const agentDir = path.join(rootDir, "agent");
+    const skillFile = path.join(agentDir, "skills", "manual-skill", "SKILL.md");
+    writeSkill(agentDir, "manual-skill", "Manual Skill");
+
+    expect(
+      retireWorkspaceSkill({
+        skillName: "Manual Skill",
+        skillFile,
+        reason: "retired by owner",
+      }),
+    ).toMatchObject({
+      skillFile,
+      skillKey: "manual-skill",
+      state: "archived",
+      archivedReason: "retired by owner",
+    });
+
+    expect(
+      buildWorkspaceSkillSnapshot(agentDir, {
+        managedSkillsDir: path.join(rootDir, "managed"),
+        bundledSkillsDir: path.join(rootDir, "bundled"),
+      }).skills.map((skill) => skill.name),
+    ).not.toContain("Manual Skill");
+
+    expect(restoreWorkspaceSkill({ skillName: "Manual Skill", skillFile })).toMatchObject({
+      skillFile,
+      skillKey: "manual-skill",
+      state: "active",
+      archivedReason: null,
+    });
+
+    expect(
+      buildWorkspaceSkillSnapshot(agentDir, {
+        managedSkillsDir: path.join(rootDir, "managed"),
+        bundledSkillsDir: path.join(rootDir, "bundled"),
+      }).skills.map((skill) => skill.name),
+    ).toContain("Manual Skill");
   });
 });

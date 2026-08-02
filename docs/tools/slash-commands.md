@@ -248,7 +248,7 @@ plugins.
     | Command | Description |
     | --- | --- |
     | `/skill <name> [input]` | Run a skill by name |
-    | `/skill list\|apply\|reject\|quarantine ...` | Owner-only Skill Workshop proposal management. See [Skill Workshop](/tools/skill-workshop) |
+    | `/skill list\|apply\|reject\|quarantine\|retire\|restore ...` | Owner-only Skill Workshop proposal and reversible retirement management. See [Skill Workshop](/tools/skill-workshop) |
     | `/learn [request]` | Draft one reviewable skill from the current conversation or named sources through [Skill Workshop](/tools/skill-workshop) |
     | `/allowlist [list\|add\|remove] ...` | Manage allowlist entries. Text-only |
     | `/approve <id> <decision>` | Resolve exec or plugin approval prompts |

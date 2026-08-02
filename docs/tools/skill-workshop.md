@@ -1,5 +1,5 @@
 ---
-summary: "Create and update workspace skills through Skill Workshop review"
+summary: "Create, update, and retire workspace skills through Skill Workshop review"
 read_when:
   - You want the agent to create or update a skill from chat
   - You need to review, apply, reject, or quarantine a generated skill draft
@@ -16,6 +16,9 @@ skill only when applied.
 
 Skill Workshop writes workspace skills only. It never touches bundled,
 plugin, ClawHub, extra-root, managed, personal-agent, or system skills.
+
+An owner can also retire a writable workspace skill. Retirement removes it from
+new skill snapshots but keeps every skill file intact for an explicit restore.
 
 ## How it works
 
@@ -128,12 +131,16 @@ approval request:
 /skill apply <proposal-id>
 /skill reject <proposal-id> Duplicate or no longer wanted
 /skill quarantine <proposal-id> Needs security review
+/skill retire <skill-name>
+/skill restore <skill-name>
 ```
 
-These native commands run before the model. They are available only to the
-configured owner and call the same hash-bound, scanner-gated Workshop service
-as the tool and CLI. Ordinary agent lifecycle calls continue to use the
-configured `pending` or `auto` policy.
+These native commands run before the model and are available only to the
+configured owner. Proposal commands call the same hash-bound, scanner-gated
+Workshop service as the tool and CLI. `retire` and `restore` change only the
+canonical archived lifecycle state: they never delete or rewrite the skill's
+files. Ordinary agent lifecycle calls continue to use the configured `pending`
+or `auto` policy.
 
 The prompt identifies the proposal id and target skill, and shows the proposal
 description, support-file count, and body size. Approval requests are bounded

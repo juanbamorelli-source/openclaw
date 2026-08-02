@@ -23,8 +23,10 @@ import {
   quarantineSkillProposal,
   readSkillProposalDraftDirectory,
   rejectSkillProposal,
+  retireWorkspaceSkill,
   resolvePendingSkillProposal,
   reviseSkillProposal,
+  restoreWorkspaceSkill,
 } from "./service.js";
 import { readSkillProposalManifest, updateSkillProposalRecord } from "./store.js";
 
@@ -146,6 +148,47 @@ describe("skill workshop proposals", () => {
       filePath: applied.targetSkillFile,
     });
     expect((await inspectSkillProposal(proposal.record.id))?.record.status).toBe("applied");
+  });
+
+  it("retires and restores only a writable workspace skill", async () => {
+    testState.applyEnv();
+    try {
+      const workspaceDir = await makeWorkspace();
+      const skillDir = path.join(workspaceDir, "skills", "weather-helper");
+      await writeSkill({
+        dir: skillDir,
+        name: "weather-helper",
+        description: "Weather workflow",
+        body: "# Weather Helper\n",
+      });
+      const skillFile = await fs.realpath(path.join(skillDir, "SKILL.md"));
+
+      const beforeVersion = getSkillsSnapshotVersion(workspaceDir);
+      expect(retireWorkspaceSkill({ workspaceDir, skillName: "weather-helper" })).toMatchObject({
+        skillFile,
+        skillKey: "weather-helper",
+        state: "archived",
+        archivedReason: "retired by owner",
+      });
+      expect(getSkillsSnapshotVersion(workspaceDir)).toBeGreaterThan(beforeVersion);
+      await fs.writeFile(
+        skillFile,
+        '---\nname: "weather-helper"\ndescription: "Changed while retired"\n---\n\n# Changed\n',
+        "utf8",
+      );
+
+      expect(restoreWorkspaceSkill({ workspaceDir, skillName: "weather-helper" })).toMatchObject({
+        skillFile,
+        skillKey: "weather-helper",
+        state: "active",
+        archivedReason: null,
+      });
+      await expect(fs.readFile(skillFile, "utf8")).resolves.toBe(
+        '---\nname: "weather-helper"\ndescription: "Changed while retired"\n---\n\n# Changed\n',
+      );
+    } finally {
+      testState.restoreEnv();
+    }
   });
 
   it.runIf(process.platform !== "win32")(

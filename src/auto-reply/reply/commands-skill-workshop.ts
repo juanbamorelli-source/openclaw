@@ -6,6 +6,8 @@ import {
   listSkillProposals,
   quarantineSkillProposal,
   rejectSkillProposal,
+  retireWorkspaceSkill,
+  restoreWorkspaceSkill,
 } from "../../skills/workshop/service.js";
 import { rejectNonOwnerCommand, rejectUnauthorizedCommand } from "./command-gates.js";
 import type { CommandHandler } from "./commands-types.js";
@@ -19,12 +21,25 @@ const USAGE = [
   "/skill apply <proposal-id>",
   "/skill reject <proposal-id> [reason]",
   "/skill quarantine <proposal-id> [reason]",
+  "/skill retire <skill-name>",
+  "/skill restore <skill-name>",
 ].join("\n");
 
-type LifecycleAction = "apply" | "reject" | "quarantine";
+type ProposalLifecycleAction = "apply" | "reject" | "quarantine";
+type WorkspaceSkillLifecycleAction = "retire" | "restore";
 type ParsedSkillCommand =
   | { kind: "list"; query?: string }
-  | { kind: "lifecycle"; action: LifecycleAction; proposalId?: string; reason?: string };
+  | {
+      kind: "proposal-lifecycle";
+      action: ProposalLifecycleAction;
+      proposalId?: string;
+      reason?: string;
+    }
+  | {
+      kind: "workspace-skill-lifecycle";
+      action: WorkspaceSkillLifecycleAction;
+      skillName?: string;
+    };
 
 function parseSkillCommand(raw: string): ParsedSkillCommand | null {
   const trimmed = raw.trim();
@@ -45,13 +60,21 @@ function parseSkillCommand(raw: string): ParsedSkillCommand | null {
     const query = tokens.join(" ").trim();
     return query ? { kind: "list", query } : { kind: "list" };
   }
+  if (action === "retire" || action === "restore") {
+    const skillName = tokens.join(" ").trim();
+    return {
+      kind: "workspace-skill-lifecycle",
+      action,
+      ...(skillName ? { skillName } : {}),
+    };
+  }
   if (action !== "apply" && action !== "reject" && action !== "quarantine") {
     return null;
   }
   const proposalId = tokens.shift();
   const reason = tokens.join(" ").trim();
   return {
-    kind: "lifecycle",
+    kind: "proposal-lifecycle",
     action,
     ...(proposalId ? { proposalId } : {}),
     ...(reason ? { reason } : {}),
@@ -115,6 +138,35 @@ export const handleSkillWorkshopCommand: CommandHandler = async (params, allowTe
           )
         : listed.proposals;
       return { shouldContinue: false, reply: { text: formatProposalList(proposals) } };
+    }
+
+    if (parsed.kind === "workspace-skill-lifecycle") {
+      const skillName = parsed.skillName;
+      if (!skillName) {
+        return { shouldContinue: false, reply: { text: USAGE } };
+      }
+      if (parsed.action === "retire") {
+        const retired = retireWorkspaceSkill({
+          workspaceDir: params.workspaceDir,
+          config: params.cfg,
+          skillName,
+        });
+        return {
+          shouldContinue: false,
+          reply: {
+            text: `✅ Retired ${retired.skillKey}. Use /skill restore ${retired.skillKey} to restore it.`,
+          },
+        };
+      }
+      const restored = restoreWorkspaceSkill({
+        workspaceDir: params.workspaceDir,
+        config: params.cfg,
+        skillName,
+      });
+      return {
+        shouldContinue: false,
+        reply: { text: `✅ Restored ${restored.skillKey}.` },
+      };
     }
 
     const proposalId = parsed.proposalId;
