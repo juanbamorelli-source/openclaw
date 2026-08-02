@@ -37,6 +37,7 @@ import {
   handleStopCommand,
   handleUsageCommand,
 } from "./commands-session.js";
+import { handleSkillWorkshopCommand } from "./commands-skill-workshop.js";
 import { handleSteerCommand } from "./commands-steer.js";
 import { handleSubagentsCommand } from "./commands-subagents.js";
 import { handleTasksCommand } from "./commands-tasks.js";
@@ -60,6 +61,8 @@ export function loadCommandHandlers(): CommandHandler[] {
     handleTtsCommands,
     handleHelpCommand,
     handleCommandsListCommand,
+    // Run the exact owner command before generic /skill help or an agent turn.
+    handleSkillWorkshopCommand,
     // Keep deterministic /skill usage on the native command path before the
     // broader tool/status handlers can fall through to an agent run.
     handleSkillCommandUsage,

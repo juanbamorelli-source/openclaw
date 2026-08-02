@@ -119,6 +119,22 @@ Agent-initiated `apply`, `reject`, and `quarantine` show an approval prompt by
 default. Set `skills.workshop.approvalPolicy` to `"auto"` to skip it in
 trusted environments.
 
+An authenticated workspace owner can make the exact lifecycle decision directly
+from chat without granting agents ambient apply authority or opening a second
+approval request:
+
+```text
+/skill list
+/skill apply <proposal-id>
+/skill reject <proposal-id> Duplicate or no longer wanted
+/skill quarantine <proposal-id> Needs security review
+```
+
+These native commands run before the model. They are available only to the
+configured owner and call the same hash-bound, scanner-gated Workshop service
+as the tool and CLI. Ordinary agent lifecycle calls continue to use the
+configured `pending` or `auto` policy.
+
 The prompt identifies the proposal id and target skill, and shows the proposal
 description, support-file count, and body size. Approval requests are bounded
 to finish before the agent tool watchdog. If no decision arrives before the
