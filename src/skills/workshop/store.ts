@@ -277,12 +277,38 @@ export async function withSkillProposalTargetLock<T>(
   fn: () => Promise<T>,
   options: SkillWorkshopStoreOptions = {},
 ): Promise<T> {
-  const lockFile = path.join(
+  return await withSkillProposalTargetLocks([record.target.skillFile], fn, options);
+}
+
+export async function withSkillProposalTargetLocks<T>(
+  skillFiles: readonly string[],
+  fn: () => Promise<T>,
+  options: SkillWorkshopStoreOptions = {},
+): Promise<T> {
+  const lockFiles = [...new Set(skillFiles.map((skillFile) => path.resolve(skillFile)))].toSorted(
+    (a, b) => a.localeCompare(b),
+  );
+  const lockNext = async (index: number): Promise<T> => {
+    const skillFile = lockFiles[index];
+    if (!skillFile) {
+      return await fn();
+    }
+    return await withSkillWorkshopLock(resolveSkillProposalTargetLockPath(skillFile, options), () =>
+      lockNext(index + 1),
+    );
+  };
+  return await lockNext(0);
+}
+
+function resolveSkillProposalTargetLockPath(
+  skillFile: string,
+  options: SkillWorkshopStoreOptions = {},
+): string {
+  return path.join(
     resolveSkillWorkshopStateDir(options),
     TARGET_LOCKS_REL_DIR,
-    `${hashSkillProposalContent(record.target.skillFile)}.target`,
+    `${hashSkillProposalContent(path.resolve(skillFile))}.target`,
   );
-  return await withSkillWorkshopLock(lockFile, fn);
 }
 
 export async function writeSkillProposalRollback(params: {
@@ -398,8 +424,9 @@ export async function readProposalSupportFiles(
 export function createSkillProposalRollback(params: {
   proposalId: string;
   targetSkillFile: string;
-  action: "create" | "update";
+  action: "create" | "update" | "merge";
   previousContent?: string;
+  sourceSkills?: SkillProposalRollback["sourceSkills"];
   supportFiles?: SkillProposalRollback["supportFiles"];
 }): SkillProposalRollback {
   return {
@@ -413,6 +440,9 @@ export function createSkillProposalRollback(params: {
           previousContent: params.previousContent,
           previousContentHash: hashSkillProposalContent(params.previousContent),
         }
+      : {}),
+    ...(params.sourceSkills && params.sourceSkills.length > 0
+      ? { sourceSkills: params.sourceSkills }
       : {}),
     ...(params.supportFiles && params.supportFiles.length > 0
       ? { supportFiles: params.supportFiles }
@@ -449,7 +479,7 @@ function parseSkillProposalRecord(raw: unknown): SkillProposalRecord | null {
   if (
     record.schema !== SKILL_WORKSHOP_SCHEMA ||
     !PROPOSAL_ID_PATTERN.test(record.id) ||
-    (record.kind !== "create" && record.kind !== "update") ||
+    (record.kind !== "create" && record.kind !== "update" && record.kind !== "merge") ||
     !["pending", "applied", "rejected", "quarantined", "stale"].includes(record.status) ||
     typeof record.title !== "string" ||
     typeof record.description !== "string" ||
@@ -459,6 +489,7 @@ function parseSkillProposalRecord(raw: unknown): SkillProposalRecord | null {
     record.draftFile !== PROPOSAL_DRAFT_FILE ||
     !isValidProposalOrigin(record.origin) ||
     !isValidSupportFileList(record.supportFiles) ||
+    !isValidProposalSourceTargetList(record.kind, record.sources) ||
     !record.target ||
     typeof record.target !== "object" ||
     typeof record.target.skillName !== "string" ||
@@ -471,6 +502,45 @@ function parseSkillProposalRecord(raw: unknown): SkillProposalRecord | null {
     return null;
   }
   return record;
+}
+
+function isValidProposalSourceTargetList(
+  kind: SkillProposalRecord["kind"],
+  value: unknown,
+): boolean {
+  if (value === undefined) {
+    return kind !== "merge";
+  }
+  if (!Array.isArray(value)) {
+    return false;
+  }
+  if (kind === "merge" && value.length < 2) {
+    return false;
+  }
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      return false;
+    }
+    const source = item as Record<string, unknown>;
+    if (
+      typeof source.skillName !== "string" ||
+      typeof source.skillKey !== "string" ||
+      typeof source.skillDir !== "string" ||
+      typeof source.skillFile !== "string" ||
+      typeof source.currentContentHash !== "string" ||
+      !/^[a-f0-9]{64}$/i.test(source.currentContentHash) ||
+      (source.source !== undefined && typeof source.source !== "string")
+    ) {
+      return false;
+    }
+    const resolved = path.resolve(source.skillFile);
+    if (seen.has(resolved)) {
+      return false;
+    }
+    seen.add(resolved);
+  }
+  return true;
 }
 
 function isValidProposalOrigin(value: unknown): boolean {

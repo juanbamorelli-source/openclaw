@@ -221,7 +221,10 @@ async function loadCuratedSkills(
       continue;
     }
     appliedRecords.push({ appliedAtMs, record });
-    if (record.kind !== "create" || record.createdBy !== "skill-workshop") {
+    if (
+      (record.kind !== "create" && record.kind !== "merge") ||
+      record.createdBy !== "skill-workshop"
+    ) {
       continue;
     }
     const skillKey = canonicalSkillKey(record.target.skillKey || record.target.skillName);

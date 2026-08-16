@@ -3,6 +3,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { writeSkill } from "../../skills/test-support/e2e-test-helpers.js";
 import {
   createOpenClawTestState,
   type OpenClawTestState,
@@ -35,6 +36,7 @@ describe("skill_workshop tool", () => {
 
     expect(schema).toContain("create = new skill");
     expect(schema).toContain("update = existing live skill");
+    expect(schema).toContain("merge = new target from source skills");
     expect(schema).toContain("revise = existing pending proposal");
     expect(schema).toContain("not filesystem search");
     expect(schema).toContain("when proposal_id is unknown");
@@ -284,6 +286,49 @@ describe("skill_workshop tool", () => {
     expect((revisedByName.content[0] as { text: string }).text).toBe(
       `Revised skill proposal ${(result.details as { id: string }).id} (pending) for weather-planner.`,
     );
+  });
+
+  it("creates pending merge proposals with source skill metadata", async () => {
+    const workspaceDir = await tempDirs.make("openclaw-skill-workshop-tool-merge-");
+    await writeSkill({
+      dir: path.join(workspaceDir, "skills", "source-one"),
+      name: "source-one",
+      description: "First source",
+      body: "# Source One\n\nFirst.\n",
+    });
+    await writeSkill({
+      dir: path.join(workspaceDir, "skills", "source-two"),
+      name: "source-two",
+      description: "Second source",
+      body: "# Source Two\n\nSecond.\n",
+    });
+    const tool = createSkillWorkshopTool({
+      workspaceDir,
+      config: {},
+      agentId: "main",
+    });
+
+    const result = await tool.execute("call-merge", {
+      action: "merge",
+      target_name: "combined-source",
+      target_description: "Combined source workflow",
+      source_skill_names: ["source-one", "source-two"],
+      proposal_content: "# Combined Source\n\nUse both source workflows.\n",
+    });
+
+    expect(result.details).toMatchObject({
+      status: "pending",
+      kind: "merge",
+      skillKey: "combined-source",
+      sourceSkillKeys: ["source-one", "source-two"],
+      scanState: "clean",
+    });
+    expect((result.content[0] as { text: string }).text).toBe(
+      `Created skill merge proposal ${(result.details as { id: string }).id} (pending) for combined-source.`,
+    );
+    await expect(
+      fs.access(path.join(workspaceDir, "skills", "combined-source", "SKILL.md")),
+    ).rejects.toThrow();
   });
 
   it("rejects whitespace-only proposal content while preserving raw valid markdown", async () => {

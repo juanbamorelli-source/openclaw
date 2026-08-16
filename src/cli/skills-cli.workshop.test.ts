@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Command } from "commander";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { writeSkill } from "../skills/test-support/e2e-test-helpers.js";
 import {
   createOpenClawTestState,
   type OpenClawTestState,
@@ -210,6 +211,45 @@ describe("skills workshop cli", () => {
     mocks.workspaceDir = firstWorkspaceDir;
     await runCommand(["skills", "workshop", "inspect", proposalId!]);
     expect(mocks.runtimeStdout.at(-1)).toContain("status: proposal");
+  });
+
+  it("creates merge proposals from existing workspace skills", async () => {
+    await writeSkill({
+      dir: path.join(mocks.workspaceDir, "skills", "left-skill"),
+      name: "left-skill",
+      description: "Left source",
+      body: "# Left Skill\n\nLeft steps.\n",
+    });
+    await writeSkill({
+      dir: path.join(mocks.workspaceDir, "skills", "right-skill"),
+      name: "right-skill",
+      description: "Right source",
+      body: "# Right Skill\n\nRight steps.\n",
+    });
+    const draftPath = path.join(mocks.workspaceDir, "merge-proposal.md");
+    await fs.writeFile(draftPath, "# Merged Skill\n\nMerged steps.\n", "utf8");
+
+    await runCommand([
+      "skills",
+      "workshop",
+      "propose-merge",
+      "merged-skill",
+      "left-skill",
+      "right-skill",
+      "--description",
+      "Merged workflow",
+      "--proposal",
+      draftPath,
+    ]);
+
+    const proposalId = mocks.runtimeStdout.at(-1);
+    expect(proposalId).toMatch(/^merged-skill-/);
+    await runCommand(["skills", "workshop", "inspect", proposalId!]);
+    expect(mocks.runtimeStdout.at(-1)).toContain("Kind: merge");
+    expect(mocks.runtimeStdout.at(-1)).toContain("Sources: left-skill, right-skill");
+    await expect(
+      fs.access(path.join(mocks.workspaceDir, "skills", "merged-skill", "SKILL.md")),
+    ).rejects.toThrow();
   });
 
   it("rejects missing proposal drafts before creating workshop state", async () => {

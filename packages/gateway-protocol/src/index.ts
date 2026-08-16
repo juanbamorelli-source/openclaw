@@ -490,6 +490,8 @@ import {
   SkillsProposalInspectParamsSchema,
   type SkillsProposalInspectResult,
   SkillsProposalInspectResultSchema,
+  type SkillsProposalMergeParams,
+  SkillsProposalMergeParamsSchema,
   type SkillsProposalRecordResult,
   SkillsProposalRecordResultSchema,
   type SkillsProposalRequestRevisionParams,
@@ -973,6 +975,9 @@ export const validateSkillsProposalCreateParams = lazyCompile<SkillsProposalCrea
 export const validateSkillsProposalUpdateParams = lazyCompile<SkillsProposalUpdateParams>(
   SkillsProposalUpdateParamsSchema,
 );
+export const validateSkillsProposalMergeParams = lazyCompile<SkillsProposalMergeParams>(
+  SkillsProposalMergeParamsSchema,
+);
 export const validateSkillsProposalReviseParams = lazyCompile<SkillsProposalReviseParams>(
   SkillsProposalReviseParamsSchema,
 );
@@ -1355,6 +1360,7 @@ export {
   SkillsProposalInspectResultSchema,
   SkillsProposalCreateParamsSchema,
   SkillsProposalUpdateParamsSchema,
+  SkillsProposalMergeParamsSchema,
   SkillsProposalReviseParamsSchema,
   SkillsProposalRequestRevisionParamsSchema,
   SkillsProposalRequestRevisionResultSchema,
@@ -1577,6 +1583,7 @@ export type {
   SkillsProposalInspectResult,
   SkillsProposalCreateParams,
   SkillsProposalUpdateParams,
+  SkillsProposalMergeParams,
   SkillsProposalReviseParams,
   SkillsProposalRequestRevisionParams,
   SkillsProposalRequestRevisionResult,

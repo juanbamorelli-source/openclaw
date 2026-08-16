@@ -44,6 +44,7 @@ import {
   inspectSkillProposal,
   listSkillProposals,
   proposeCreateSkill,
+  proposeMergeSkill,
   proposeUpdateSkill,
   quarantineSkillProposal,
   readSkillProposalDraftDirectory,
@@ -283,6 +284,9 @@ function formatSkillProposalInspect(read: SkillProposalReadResult): string {
     `Skill: ${record.target.skillName}`,
     `Target: ${record.target.skillFile}`,
     `Scanner: ${record.scan.state}`,
+    record.sources && record.sources.length > 0
+      ? `Sources: ${record.sources.map((source) => source.skillKey).join(", ")}`
+      : undefined,
     record.statusReason ? `Reason: ${record.statusReason}` : undefined,
     "",
     read.content,
@@ -901,6 +905,66 @@ export function registerSkillsCli(program: Command) {
             agentId,
             skillName: skill,
             description: opts.description,
+            content: draft.content,
+            supportFiles: draft.supportFiles,
+            createdBy: "cli",
+            goal: opts.goal,
+            evidence: opts.evidence,
+          });
+          if (opts.json) {
+            defaultRuntime.writeJson(proposal);
+            return;
+          }
+          defaultRuntime.writeStdout(`${proposal.record.id}\n`);
+        } catch (err) {
+          defaultRuntime.error(String(err));
+          defaultRuntime.exit(1);
+        }
+      },
+    );
+
+  workshop
+    .command("propose-merge")
+    .description("Create a pending proposal that merges existing workspace skills into a new skill")
+    .argument("<target>", "New target skill name or key")
+    .argument("<sources...>", "Existing source skill names or keys")
+    .requiredOption("--description <description>", "New target skill description")
+    .option("--proposal <path>", "Path to PROPOSAL.md draft content for the merged skill")
+    .option(
+      "--proposal-dir <path>",
+      "Path to proposal directory with PROPOSAL.md and UTF-8 text support files",
+    )
+    .option("--goal <text>", "Proposal or improvement goal")
+    .option("--evidence <text>", "Evidence or notes for the proposal")
+    .option("--json", "Output as JSON", false)
+    .action(
+      async (
+        target: string,
+        sources: string[],
+        opts: {
+          description: string;
+          proposal?: string;
+          proposalDir?: string;
+          goal?: string;
+          evidence?: string;
+          json?: boolean;
+          agent?: string;
+        },
+        command: Command,
+      ) => {
+        try {
+          const { config, workspaceDir, agentId } = resolveSkillsWorkspaceForCommand(
+            command.parent,
+            opts,
+          );
+          const draft = await readSkillProposalInput(opts);
+          const proposal = await proposeMergeSkill({
+            workspaceDir,
+            config,
+            agentId,
+            targetName: target,
+            targetDescription: opts.description,
+            sourceSkillNames: sources,
             content: draft.content,
             supportFiles: draft.supportFiles,
             createdBy: "cli",

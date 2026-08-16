@@ -23,6 +23,7 @@ import { bumpSkillsSnapshotVersion } from "../runtime/refresh-state.js";
 import { scanSkillContent, scanSource } from "../security/scanner.js";
 import { resolveSkillWorkshopConfig, type SkillWorkshopConfig } from "./config.js";
 import {
+  getSkillCuratorStatus,
   retireWorkspaceSkill as retireWorkspaceSkillLifecycle,
   restoreWorkspaceSkill as restoreWorkspaceSkillLifecycle,
 } from "./curator.js";
@@ -47,7 +48,7 @@ import {
   updateSkillProposalRecord,
   writeSkillProposal,
   writeSkillProposalRollback,
-  withSkillProposalTargetLock,
+  withSkillProposalTargetLocks,
   type PreparedSkillProposalSupportFile,
 } from "./store.js";
 import {
@@ -55,6 +56,7 @@ import {
   type SkillProposalActionInput,
   type SkillProposalApplyResult,
   type SkillProposalCreateInput,
+  type SkillProposalMergeInput,
   type SkillProposalOrigin,
   type SkillProposalManifest,
   type SkillProposalReadResult,
@@ -62,6 +64,7 @@ import {
   type SkillProposalReviseInput,
   type SkillProposalRollback,
   type SkillProposalScan,
+  type SkillProposalSourceTarget,
   type SkillProposalSupportFile,
   type SkillProposalSupportFileInput,
   type SkillProposalUpdateInput,
@@ -469,6 +472,81 @@ export async function proposeUpdateSkill(
   return { record, content: proposalContent };
 }
 
+export async function proposeMergeSkill(
+  input: SkillProposalMergeInput & SkillWorkshopWorkspaceOptions,
+): Promise<SkillProposalReadResult> {
+  const targetName = normalizeRequired(input.targetName, "Target skill name");
+  const description = normalizeRequired(input.targetDescription, "Target skill description");
+  const config = resolveSkillWorkshopConfig(input.config);
+  assertProposalDescriptionWithinLimit(description);
+  assertProposalContentWithinLimit(input.content, config.maxSkillBytes);
+  const target = resolveSkillProposalTarget({
+    workspaceDir: input.workspaceDir,
+    skillName: targetName,
+  });
+  if ((await readWorkspaceSkillFile(target.skillFile)) !== null) {
+    throw new Error(`Target skill already exists: ${target.skillFile}.`);
+  }
+
+  const sources = await resolveMergeProposalSources({
+    workspaceDir: input.workspaceDir,
+    config: input.config,
+    agentId: input.agentId,
+    sourceSkillNames: input.sourceSkillNames,
+    targetSkillKey: target.skillKey,
+  });
+  const supportFiles = prepareSkillProposalSupportFiles(input.supportFiles);
+  const now = new Date().toISOString();
+  const proposalContent = renderProposalMarkdown({
+    name: target.skillKey,
+    description,
+    content: input.content,
+    date: now,
+  });
+  const id = createSkillProposalId(target.skillKey);
+  const goal = normalizeOptionalString(input.goal);
+  const evidence = normalizeOptionalString(input.evidence);
+  const origin = normalizeProposalOrigin(input.origin);
+  const record: SkillProposalRecord = {
+    schema: SKILL_WORKSHOP_SCHEMA,
+    id,
+    kind: "merge",
+    status: "pending",
+    title: `Merge into ${target.skillKey}`,
+    description,
+    createdAt: now,
+    updatedAt: now,
+    createdBy: input.createdBy ?? "skill-workshop",
+    ...(origin ? { origin } : {}),
+    proposedVersion: "v1",
+    draftFile: "PROPOSAL.md",
+    draftHash: hashSkillProposalContent(proposalContent),
+    target: {
+      skillName: targetName,
+      skillKey: target.skillKey,
+      skillDir: target.skillDir,
+      skillFile: target.skillFile,
+      source: "openclaw-workspace",
+    },
+    sources,
+    scan: scanProposalBundle(proposalContent, supportFiles),
+    ...(supportFiles.length > 0
+      ? { supportFiles: await buildSupportFileMetadata(supportFiles) }
+      : {}),
+    ...(goal ? { goal } : {}),
+    ...(evidence ? { evidence } : {}),
+  };
+  await writeSkillProposal({
+    record,
+    content: proposalContent,
+    supportFiles,
+    beforeWrite: async (manifest) => {
+      await assertCanCreatePendingProposal(input.workspaceDir, config, manifest);
+    },
+  });
+  return { record, content: proposalContent };
+}
+
 export async function reviseSkillProposal(
   input: SkillProposalReviseInput,
 ): Promise<SkillProposalReadResult> {
@@ -484,7 +562,7 @@ export async function reviseSkillProposal(
         await markProposalStale(record, "Target skill was created after proposal creation.");
         throw new Error("Target skill was created after proposal creation; proposal marked stale.");
       }
-    } else {
+    } else if (record.kind === "update") {
       const currentContent = await readWorkspaceSkillFile(record.target.skillFile);
       if (currentContent === null) {
         throw new Error(`Target skill is missing: ${record.target.skillFile}`);
@@ -497,6 +575,8 @@ export async function reviseSkillProposal(
         throw new Error("Target skill changed after proposal creation; proposal marked stale.");
       }
       await assertSupportTargetsUnchanged(record);
+    } else {
+      await assertMergeProposalUnchanged(input.workspaceDir, record);
     }
 
     const supportFiles =
@@ -620,64 +700,209 @@ export async function applySkillProposal(
       throw new Error("Proposal scan failed; proposal was quarantined.");
     }
 
-    assertInsideWorkspace(input.workspaceDir, record.target.skillFile, "skill file");
-    assertInsideWorkspace(input.workspaceDir, record.target.skillDir, "skill directory");
-    const workshopConfig = resolveSkillWorkshopConfig(input.config);
-    const symlinkPolicy = {
-      allowWrites: workshopConfig.allowSymlinkTargetWrites,
-      allowedTargetRealPaths: workshopConfig.allowSymlinkTargetWrites
-        ? resolveAllowedSkillSymlinkTargetRealPaths(input.config)
-        : [],
-    };
-    await assertWorkspaceSkillWriteTarget({
-      workspaceDir: input.workspaceDir,
-      filePath: record.target.skillFile,
-      symlinkPolicy,
+    if (record.kind === "merge") {
+      return await applyMergeProposal({
+        input,
+        record,
+        content,
+        supportFiles,
+        scan,
+      });
+    }
+    return await applyCreateOrUpdateProposal({
+      input,
+      record,
+      content,
+      supportFiles,
+      scan,
     });
-    const targetState = await readApplyTargetState(record, supportFiles);
-    const rollback = createSkillProposalRollback({
-      proposalId: record.id,
-      targetSkillFile: record.target.skillFile,
-      action: record.kind,
-      ...(targetState.previousContent !== null
-        ? { previousContent: targetState.previousContent }
-        : {}),
-      ...(targetState.previousSupportFiles.length > 0
-        ? { supportFiles: targetState.previousSupportFiles }
-        : {}),
-    });
-    await writeSkillProposalRollback({
-      proposalId: record.id,
-      rollback,
-    });
+  });
+}
 
-    const skillContent = stripProposalFrontmatterForSkill(content);
+async function applyCreateOrUpdateProposal(params: {
+  input: SkillProposalActionInput;
+  record: SkillProposalRecord;
+  content: string;
+  supportFiles: readonly PreparedSkillProposalSupportFile[];
+  scan: SkillProposalScan;
+}): Promise<SkillProposalApplyResult> {
+  const { input, record, content, supportFiles, scan } = params;
+  if (record.kind !== "create" && record.kind !== "update") {
+    throw new Error(`Unsupported skill proposal kind: ${record.kind}`);
+  }
+  assertInsideWorkspace(input.workspaceDir, record.target.skillFile, "skill file");
+  assertInsideWorkspace(input.workspaceDir, record.target.skillDir, "skill directory");
+  const workshopConfig = resolveSkillWorkshopConfig(input.config);
+  const symlinkPolicy = {
+    allowWrites: workshopConfig.allowSymlinkTargetWrites,
+    allowedTargetRealPaths: workshopConfig.allowSymlinkTargetWrites
+      ? resolveAllowedSkillSymlinkTargetRealPaths(input.config)
+      : [],
+  };
+  await assertWorkspaceSkillWriteTarget({
+    workspaceDir: input.workspaceDir,
+    filePath: record.target.skillFile,
+    symlinkPolicy,
+  });
+  const targetState = await readApplyTargetState(record, supportFiles);
+  const rollback = createSkillProposalRollback({
+    proposalId: record.id,
+    targetSkillFile: record.target.skillFile,
+    action: record.kind,
+    ...(targetState.previousContent !== null
+      ? { previousContent: targetState.previousContent }
+      : {}),
+    ...(targetState.previousSupportFiles.length > 0
+      ? { supportFiles: targetState.previousSupportFiles }
+      : {}),
+  });
+  await writeSkillProposalRollback({
+    proposalId: record.id,
+    rollback,
+  });
+
+  const skillContent = stripProposalFrontmatterForSkill(content);
+  await writeWorkspaceSkill({
+    workspaceDir: input.workspaceDir,
+    skillDir: record.target.skillDir,
+    skillFile: record.target.skillFile,
+    content: skillContent,
+    supportFiles,
+    mode: record.kind,
+    symlinkPolicy,
+  });
+  bumpSkillsSnapshotVersion({
+    workspaceDir: input.workspaceDir,
+    reason: "workshop",
+    changedPath: record.target.skillFile,
+  });
+  const now = new Date().toISOString();
+  const applied: SkillProposalRecord = {
+    ...record,
+    status: "applied",
+    updatedAt: now,
+    appliedAt: now,
+    scan,
+  };
+  await updateSkillProposalRecord({ record: applied });
+  await refreshSkillProposalManifest();
+  return { record: applied, targetSkillFile: record.target.skillFile };
+}
+
+async function applyMergeProposal(params: {
+  input: SkillProposalActionInput;
+  record: SkillProposalRecord;
+  content: string;
+  supportFiles: readonly PreparedSkillProposalSupportFile[];
+  scan: SkillProposalScan;
+}): Promise<SkillProposalApplyResult> {
+  const { input, record, content, supportFiles, scan } = params;
+  const sources = record.sources;
+  if (!sources || sources.length < 2) {
+    throw new Error("Merge proposal is missing source skills.");
+  }
+  assertInsideWorkspace(input.workspaceDir, record.target.skillFile, "skill file");
+  assertInsideWorkspace(input.workspaceDir, record.target.skillDir, "skill directory");
+  const workshopConfig = resolveSkillWorkshopConfig(input.config);
+  const symlinkPolicy = {
+    allowWrites: workshopConfig.allowSymlinkTargetWrites,
+    allowedTargetRealPaths: workshopConfig.allowSymlinkTargetWrites
+      ? resolveAllowedSkillSymlinkTargetRealPaths(input.config)
+      : [],
+  };
+  await assertWorkspaceSkillWriteTarget({
+    workspaceDir: input.workspaceDir,
+    filePath: record.target.skillFile,
+    symlinkPolicy,
+  });
+  await assertMergeProposalUnchanged(input.workspaceDir, record);
+  const targetState = await readApplyTargetState(record, supportFiles);
+  const rollback = createSkillProposalRollback({
+    proposalId: record.id,
+    targetSkillFile: record.target.skillFile,
+    action: "merge",
+    sourceSkills: sources.map((source) => ({
+      skillName: source.skillName,
+      skillKey: source.skillKey,
+      skillFile: source.skillFile,
+      previousContentHash: source.currentContentHash,
+    })),
+    ...(targetState.previousContent !== null
+      ? { previousContent: targetState.previousContent }
+      : {}),
+    ...(targetState.previousSupportFiles.length > 0
+      ? { supportFiles: targetState.previousSupportFiles }
+      : {}),
+  });
+  await writeSkillProposalRollback({
+    proposalId: record.id,
+    rollback,
+  });
+
+  const skillContent = stripProposalFrontmatterForSkill(content);
+  const retiredSources: SkillProposalSourceTarget[] = [];
+  let wroteTarget = false;
+  try {
     await writeWorkspaceSkill({
       workspaceDir: input.workspaceDir,
       skillDir: record.target.skillDir,
       skillFile: record.target.skillFile,
       content: skillContent,
       supportFiles,
-      mode: record.kind,
+      mode: "create",
       symlinkPolicy,
     });
-    bumpSkillsSnapshotVersion({
-      workspaceDir: input.workspaceDir,
-      reason: "workshop",
-      changedPath: record.target.skillFile,
-    });
-    const now = new Date().toISOString();
-    const applied: SkillProposalRecord = {
-      ...record,
-      status: "applied",
-      updatedAt: now,
-      appliedAt: now,
-      scan,
-    };
-    await updateSkillProposalRecord({ record: applied });
-    await refreshSkillProposalManifest();
-    return { record: applied, targetSkillFile: record.target.skillFile };
+    wroteTarget = true;
+    for (const source of sources) {
+      retireWorkspaceSkillLifecycle({
+        skillName: source.skillName,
+        skillFile: source.skillFile,
+        reason: `merged into ${record.target.skillKey}`,
+      });
+      retiredSources.push(source);
+    }
+  } catch (error) {
+    for (const source of retiredSources.toReversed()) {
+      try {
+        restoreWorkspaceSkillLifecycle({
+          skillName: source.skillName,
+          skillFile: source.skillFile,
+        });
+      } catch {
+        // Keep the original failure visible; rollback metadata records the source set.
+      }
+    }
+    if (wroteTarget) {
+      await removeCreatedMergeTarget({
+        workspaceDir: input.workspaceDir,
+        record,
+        supportFiles,
+        symlinkPolicy,
+      }).catch(() => undefined);
+    }
+    throw error;
+  }
+
+  bumpSkillsSnapshotVersion({
+    workspaceDir: input.workspaceDir,
+    reason: "workshop",
+    changedPath: record.target.skillFile,
   });
+  const now = new Date().toISOString();
+  const applied: SkillProposalRecord = {
+    ...record,
+    status: "applied",
+    updatedAt: now,
+    appliedAt: now,
+    scan,
+  };
+  await updateSkillProposalRecord({ record: applied });
+  await refreshSkillProposalManifest();
+  return {
+    record: applied,
+    targetSkillFile: record.target.skillFile,
+    changedTargets: [record.target.skillFile, ...sources.map((source) => source.skillFile)],
+  };
 }
 
 async function readApplyTargetState(
@@ -688,7 +913,12 @@ async function readApplyTargetState(
   previousSupportFiles: NonNullable<SkillProposalRollback["supportFiles"]>;
 }> {
   const previousContent = await readWorkspaceSkillFile(record.target.skillFile);
-  if (record.kind === "create" && previousContent !== null) {
+  const createsTarget = record.kind === "create" || record.kind === "merge";
+  if (createsTarget && previousContent !== null) {
+    if (record.kind === "merge") {
+      await markProposalStale(record, "Target skill was created after proposal creation.");
+      throw new Error("Target skill was created after proposal creation; proposal marked stale.");
+    }
     throw new Error(`Target skill already exists: ${record.target.skillFile}`);
   }
   const previousSupportFiles: NonNullable<SkillProposalRollback["supportFiles"]> = [];
@@ -698,7 +928,7 @@ async function readApplyTargetState(
       skillDir: record.target.skillDir,
       relativePath: file.path,
     });
-    if (record.kind === "create" && previousSupportContent !== null) {
+    if (createsTarget && previousSupportContent !== null) {
       throw new Error(
         `Target support file already exists: ${path.join(record.target.skillDir, file.path)}`,
       );
@@ -744,6 +974,142 @@ async function readApplyTargetState(
     }
   }
   return { previousContent, previousSupportFiles };
+}
+
+async function resolveMergeProposalSources(input: {
+  workspaceDir: string;
+  config?: OpenClawConfig;
+  agentId?: string;
+  sourceSkillNames: readonly string[];
+  targetSkillKey: string;
+}): Promise<SkillProposalSourceTarget[]> {
+  const sourceNames = input.sourceSkillNames
+    .map((name) => normalizeOptionalString(name))
+    .filter((name): name is string => Boolean(name));
+  if (sourceNames.length < 2) {
+    throw new Error("Merge proposals require at least two source skills.");
+  }
+  const normalizedSourceKeys = new Set<string>();
+  const status = buildWorkspaceSkillStatus(input.workspaceDir, {
+    config: input.config,
+    agentId: input.agentId,
+  });
+  const sourceTargets: SkillProposalSourceTarget[] = [];
+  const sourceFiles = new Set<string>();
+  for (const sourceName of sourceNames) {
+    const normalizedName = normalizeSkillIndexName(sourceName);
+    if (normalizedName && normalizedSourceKeys.has(normalizedName)) {
+      throw new Error(`Duplicate merge source skill: ${sourceName}`);
+    }
+    if (normalizedName) {
+      normalizedSourceKeys.add(normalizedName);
+    }
+    const sourceSkill = resolveSkillStatusEntry(status.skills, sourceName);
+    if (!sourceSkill) {
+      throw new Error(`Skill not found: ${sourceName}`);
+    }
+    assertWritableSkillTarget(input.workspaceDir, sourceSkill);
+    if (sourceSkill.skillKey === input.targetSkillKey) {
+      throw new Error("Merge target must be different from every source skill.");
+    }
+    const resolvedFile = path.resolve(sourceSkill.filePath);
+    if (sourceFiles.has(resolvedFile)) {
+      throw new Error(`Duplicate merge source skill file: ${sourceSkill.filePath}`);
+    }
+    sourceFiles.add(resolvedFile);
+    await assertWorkspaceSkillActive(sourceSkill.filePath, sourceSkill.name);
+    const currentContent = await readWorkspaceSkillFile(sourceSkill.filePath);
+    if (currentContent === null) {
+      throw new Error(`Skill file is missing: ${sourceSkill.filePath}`);
+    }
+    sourceTargets.push({
+      skillName: sourceSkill.name,
+      skillKey: sourceSkill.skillKey,
+      skillDir: sourceSkill.baseDir,
+      skillFile: sourceSkill.filePath,
+      source: sourceSkill.source,
+      currentContentHash: hashSkillProposalContent(currentContent),
+    });
+  }
+  return sourceTargets;
+}
+
+async function assertMergeProposalUnchanged(
+  workspaceDir: string,
+  record: SkillProposalRecord,
+): Promise<void> {
+  const currentTargetContent = await readWorkspaceSkillFile(record.target.skillFile);
+  if (currentTargetContent !== null) {
+    await markProposalStale(record, "Target skill was created after proposal creation.");
+    throw new Error("Target skill was created after proposal creation; proposal marked stale.");
+  }
+  assertInsideWorkspace(workspaceDir, record.target.skillFile, "skill file");
+  assertInsideWorkspace(workspaceDir, record.target.skillDir, "skill directory");
+  const sources = record.sources;
+  if (!sources || sources.length < 2) {
+    throw new Error("Merge proposal is missing source skills.");
+  }
+  for (const source of sources) {
+    assertInsideWorkspace(workspaceDir, source.skillFile, "source skill file");
+    assertInsideWorkspace(workspaceDir, source.skillDir, "source skill directory");
+    await assertWorkspaceSkillActive(source.skillFile, source.skillName);
+    const currentContent = await readWorkspaceSkillFile(source.skillFile);
+    if (currentContent === null) {
+      await markProposalStale(record, `Source skill is missing: ${source.skillName}`);
+      throw new Error("Source skill changed after proposal creation; proposal marked stale.");
+    }
+    if (hashSkillProposalContent(currentContent) !== source.currentContentHash) {
+      await markProposalStale(
+        record,
+        `Source skill changed after proposal creation: ${source.skillName}`,
+      );
+      throw new Error("Source skill changed after proposal creation; proposal marked stale.");
+    }
+  }
+}
+
+async function assertWorkspaceSkillActive(skillFile: string, skillName: string): Promise<void> {
+  const canonicalSkillFile = await resolveLifecycleSkillFile(skillFile);
+  const lifecycle = getSkillCuratorStatus().skills.find(
+    (entry) => entry.skillFile === canonicalSkillFile,
+  );
+  if (lifecycle?.state === "archived") {
+    throw new Error(`Source skill is retired: ${skillName}`);
+  }
+}
+
+async function resolveLifecycleSkillFile(skillFile: string): Promise<string> {
+  try {
+    return await fs.realpath(skillFile);
+  } catch {
+    return path.resolve(skillFile);
+  }
+}
+
+async function removeCreatedMergeTarget(params: {
+  workspaceDir: string;
+  record: SkillProposalRecord;
+  supportFiles: readonly PreparedSkillProposalSupportFile[];
+  symlinkPolicy: {
+    allowWrites: boolean;
+    allowedTargetRealPaths: readonly string[];
+  };
+}): Promise<void> {
+  for (const file of params.supportFiles.toReversed()) {
+    const filePath = path.join(params.record.target.skillDir, ...file.path.split("/"));
+    await assertWorkspaceSkillWriteTarget({
+      workspaceDir: params.workspaceDir,
+      filePath,
+      symlinkPolicy: params.symlinkPolicy,
+    });
+    await fs.rm(filePath, { force: true });
+  }
+  await assertWorkspaceSkillWriteTarget({
+    workspaceDir: params.workspaceDir,
+    filePath: params.record.target.skillFile,
+    symlinkPolicy: params.symlinkPolicy,
+  });
+  await fs.rm(params.record.target.skillFile, { force: true });
 }
 
 function scanProposalBundle(
@@ -912,7 +1278,7 @@ async function withPendingSkillProposalMutation<T>(
   fn: (read: SkillProposalReadResult) => Promise<T>,
 ): Promise<T> {
   const initial = await readRequiredProposal(input.proposalId, input.workspaceDir);
-  return await withSkillProposalTargetLock(initial.record, async () => {
+  return await withSkillProposalTargetLocks(proposalLockFiles(initial.record), async () => {
     const read = await readRequiredProposal(input.proposalId, input.workspaceDir);
     if (read.record.status !== "pending") {
       throw new Error(
@@ -921,6 +1287,13 @@ async function withPendingSkillProposalMutation<T>(
     }
     return await fn(read);
   });
+}
+
+function proposalLockFiles(record: SkillProposalRecord): string[] {
+  return [
+    record.target.skillFile,
+    ...(record.kind === "merge" ? (record.sources ?? []).map((source) => source.skillFile) : []),
+  ];
 }
 
 async function assertSupportTargetUnchanged(params: {
@@ -998,6 +1371,10 @@ function isProposalInWorkspace(record: SkillProposalRecord, workspaceDir: string
   try {
     assertInsideWorkspace(workspaceDir, record.target.skillFile, "skill file");
     assertInsideWorkspace(workspaceDir, record.target.skillDir, "skill directory");
+    for (const source of record.sources ?? []) {
+      assertInsideWorkspace(workspaceDir, source.skillFile, "source skill file");
+      assertInsideWorkspace(workspaceDir, source.skillDir, "source skill directory");
+    }
     return true;
   } catch {
     return false;

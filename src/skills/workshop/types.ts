@@ -8,7 +8,7 @@ export const SKILL_WORKSHOP_MANIFEST_SCHEMA =
   "openclaw.skill-workshop.proposals-manifest.v1" as const;
 export const SKILL_WORKSHOP_ROLLBACK_SCHEMA = "openclaw.skill-workshop.rollback.v1" as const;
 
-type SkillProposalKind = "create" | "update";
+type SkillProposalKind = "create" | "update" | "merge";
 export type SkillProposalStatus = "pending" | "applied" | "rejected" | "quarantined" | "stale";
 type SkillProposalScannerState = "pending" | "clean" | "failed" | "quarantined";
 type SkillProposalSource = "skill-workshop" | "cli" | "gateway";
@@ -38,6 +38,10 @@ type SkillProposalTarget = {
   currentContentHash?: string;
 };
 
+export type SkillProposalSourceTarget = SkillProposalTarget & {
+  currentContentHash: string;
+};
+
 export type SkillProposalSupportFile = {
   path: string;
   sizeBytes: number;
@@ -62,6 +66,7 @@ export type SkillProposalRecord = {
   draftHash: string;
   supportFiles?: SkillProposalSupportFile[];
   target: SkillProposalTarget;
+  sources?: SkillProposalSourceTarget[];
   scan: SkillProposalScan;
   goal?: string;
   evidence?: string;
@@ -96,9 +101,15 @@ export type SkillProposalRollback = {
   proposalId: string;
   writtenAt: string;
   targetSkillFile: string;
-  action: "create" | "update";
+  action: "create" | "update" | "merge";
   previousContentHash?: string;
   previousContent?: string;
+  sourceSkills?: Array<{
+    skillName: string;
+    skillKey: string;
+    skillFile: string;
+    previousContentHash: string;
+  }>;
   supportFiles?: Array<{
     path: string;
     existed: boolean;
@@ -138,6 +149,20 @@ export type SkillProposalUpdateInput = {
   evidence?: string;
 };
 
+export type SkillProposalMergeInput = {
+  workspaceDir: string;
+  config?: OpenClawConfig;
+  targetName: string;
+  targetDescription: string;
+  sourceSkillNames: string[];
+  content: string;
+  supportFiles?: SkillProposalSupportFileInput[];
+  createdBy?: SkillProposalSource;
+  origin?: SkillProposalOrigin;
+  goal?: string;
+  evidence?: string;
+};
+
 export type SkillProposalReviseInput = {
   workspaceDir: string;
   config?: OpenClawConfig;
@@ -165,4 +190,5 @@ export type SkillProposalReadResult = {
 export type SkillProposalApplyResult = {
   record: SkillProposalRecord;
   targetSkillFile: string;
+  changedTargets?: string[];
 };

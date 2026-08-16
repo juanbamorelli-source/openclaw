@@ -10,6 +10,7 @@ import {
   inspectSkillProposal,
   listSkillProposals,
   proposeCreateSkill,
+  proposeMergeSkill,
   proposeUpdateSkill,
   quarantineSkillProposal,
   rejectSkillProposal,
@@ -36,6 +37,7 @@ import {
 const SKILL_WORKSHOP_ACTIONS = [
   "create",
   "update",
+  "merge",
   "revise",
   "list",
   "inspect",
@@ -55,7 +57,7 @@ const SkillWorkshopToolSchema = Type.Object(
   {
     action: stringEnum(SKILL_WORKSHOP_ACTIONS, {
       description:
-        "create = new skill; update = existing live skill; revise = existing pending proposal; list/inspect discover pending proposals (not filesystem search); apply/reject/quarantine are explicit lifecycle actions.",
+        "create = new skill; update = existing live skill; merge = new target from source skills; revise = existing pending proposal; list/inspect discover pending proposals (not filesystem search); apply/reject/quarantine are explicit lifecycle actions.",
     }),
     proposal_id: Type.Optional(
       Type.String({
@@ -92,10 +94,25 @@ const SkillWorkshopToolSchema = Type.Object(
     skill_name: Type.Optional(
       Type.String({ description: "Existing skill name or key for action=update." }),
     ),
+    target_name: Type.Optional(
+      Type.String({ description: "New target skill name for action=merge." }),
+    ),
+    target_description: Type.Optional(
+      Type.String({
+        maxLength: 160,
+        description: "Description for the new target skill when action=merge.",
+      }),
+    ),
+    source_skill_names: Type.Optional(
+      Type.Array(Type.String(), {
+        minItems: 2,
+        description: "Existing source skill names or keys to retire after merge apply.",
+      }),
+    ),
     proposal_content: Type.Optional(
       Type.String({
         description:
-          "Full proposed procedure markdown for action=create, action=update, or action=revise. It will be stored as PROPOSAL.md. Keep under configured skills.workshop.maxSkillBytes; default max is 40000 bytes.",
+          "Full proposed procedure markdown for action=create, action=update, action=merge, or action=revise. It will be stored as PROPOSAL.md. Keep under configured skills.workshop.maxSkillBytes; default max is 40000 bytes.",
       }),
     ),
     support_files: Type.Optional(
@@ -177,6 +194,7 @@ export function createSkillWorkshopTool(options: SkillWorkshopToolOptions): AnyA
         return actionResult(applied.record, {
           contentText: `Applied skill proposal ${applied.record.id}.`,
           targetSkillFile: applied.targetSkillFile,
+          changedTargets: applied.changedTargets,
         });
       }
 
@@ -248,6 +266,31 @@ export function createSkillWorkshopTool(options: SkillWorkshopToolOptions): AnyA
           evidence,
         });
         contentText = proposalMutationText("Created skill update proposal", proposal.record);
+      } else if (action === "merge") {
+        proposal = await proposeMergeSkill({
+          workspaceDir: options.workspaceDir,
+          config: options.config,
+          agentId: options.agentId,
+          targetName: readStringParam(params, "target_name", {
+            required: true,
+            label: "target_name",
+          }),
+          targetDescription: readStringParam(params, "target_description", {
+            required: true,
+            label: "target_description",
+          }),
+          sourceSkillNames: readStringArrayParam(params, "source_skill_names", {
+            required: true,
+            minItems: 2,
+          }),
+          content: proposalContent,
+          supportFiles,
+          createdBy: "skill-workshop",
+          ...(options.origin ? { origin: options.origin } : {}),
+          goal,
+          evidence,
+        });
+        contentText = proposalMutationText("Created skill merge proposal", proposal.record);
       } else if (action === "revise") {
         const pendingProposal = await resolvePendingSkillProposal({
           proposalId: readStringParam(params, "proposal_id", {
@@ -282,7 +325,7 @@ function proposalMutationText(action: string, record: SkillProposalRecord): stri
 
 function actionResult(
   record: SkillProposalRecord,
-  options: { contentText: string; targetSkillFile?: string },
+  options: { contentText: string; targetSkillFile?: string; changedTargets?: string[] },
 ) {
   return {
     content: [{ type: "text" as const, text: options.contentText }],
@@ -293,6 +336,10 @@ function actionResult(
       skillName: record.target.skillName,
       skillKey: record.target.skillKey,
       targetSkillFile: options.targetSkillFile ?? record.target.skillFile,
+      ...(options.changedTargets ? { changedTargets: options.changedTargets } : {}),
+      ...(record.sources
+        ? { sourceSkillKeys: record.sources.map((source) => source.skillKey) }
+        : {}),
       scanState: record.scan.state,
       proposedVersion: record.proposedVersion,
     },
@@ -314,6 +361,9 @@ function proposalResult(
       proposalFile: proposal.record.draftFile,
       supportFileCount: proposal.record.supportFiles?.length ?? 0,
       targetSkillFile: proposal.record.target.skillFile,
+      ...(proposal.record.sources
+        ? { sourceSkillKeys: proposal.record.sources.map((source) => source.skillKey) }
+        : {}),
       scanState: proposal.record.scan.state,
       proposedVersion: proposal.record.proposedVersion,
       ...(options.includeContent ? { proposalContent: proposal.content } : {}),
@@ -322,6 +372,33 @@ function proposalResult(
         : {}),
     },
   };
+}
+
+function readStringArrayParam(
+  params: Record<string, unknown>,
+  key: string,
+  opts: { required?: boolean; minItems?: number } = {},
+): string[] {
+  const raw = params[key];
+  if (raw === undefined) {
+    if (opts.required) {
+      throw new ToolInputError(`${key} required`);
+    }
+    return [];
+  }
+  if (!Array.isArray(raw)) {
+    throw new ToolInputError(`${key} must be an array`);
+  }
+  const out = raw.map((item, index) => {
+    if (typeof item !== "string" || item.trim().length === 0) {
+      throw new ToolInputError(`${key}[${index}] must be a non-empty string`);
+    }
+    return item;
+  });
+  if (opts.minItems !== undefined && out.length < opts.minItems) {
+    throw new ToolInputError(`${key} must include at least ${opts.minItems} items`);
+  }
+  return out;
 }
 
 function readLifecycleProposalIdParam(params: Record<string, unknown>): string {

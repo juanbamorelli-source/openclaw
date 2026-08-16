@@ -4,6 +4,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { writeSkill } from "../../skills/test-support/e2e-test-helpers.js";
 import {
   createOpenClawTestState,
   type OpenClawTestState,
@@ -34,7 +35,10 @@ vi.mock("../../agents/agent-scope.js", () => ({
 
 vi.mock("../../skills/lifecycle/clawhub.js", () => ({
   installSkillFromClawHub: vi.fn(),
+  readClawHubSkillsLockfileStatusSync: vi.fn(() => ({ entries: [] })),
   readLocalSkillCardContentSync: vi.fn(),
+  resolveClawHubSkillStatusLinkSync: vi.fn(() => undefined),
+  resolveLocalSkillCardStatusSync: vi.fn(() => undefined),
   searchSkillsFromClawHub: vi.fn(),
   updateSkillsFromClawHub: vi.fn(),
 }));
@@ -156,6 +160,49 @@ describe("skills proposal gateway handlers", () => {
         "utf8",
       ),
     ).resolves.toContain("Use current weather");
+  });
+
+  it("creates merge proposals through gateway RPC", async () => {
+    await writeSkill({
+      dir: path.join(mocks.workspaceDir, "skills", "left-source"),
+      name: "left-source",
+      description: "Left source",
+      body: "# Left Source\n\nLeft steps.\n",
+    });
+    await writeSkill({
+      dir: path.join(mocks.workspaceDir, "skills", "right-source"),
+      name: "right-source",
+      description: "Right source",
+      body: "# Right Source\n\nRight steps.\n",
+    });
+
+    const merge = await callHandler("skills.proposals.merge", {
+      targetName: "merged-source",
+      targetDescription: "Merged source workflow",
+      sourceSkillNames: ["left-source", "right-source"],
+      content: "# Merged Source\n\nMerged steps.\n",
+    });
+
+    expect(merge.error).toBeUndefined();
+    expect(merge.ok).toBe(true);
+    expect(
+      (
+        merge.response as {
+          record: { kind: string; sources?: Array<{ skillKey: string }> };
+        }
+      ).record,
+    ).toMatchObject({
+      kind: "merge",
+      sources: [{ skillKey: "left-source" }, { skillKey: "right-source" }],
+    });
+    const inspect = await callHandler("skills.proposals.inspect", {
+      proposalId: (merge.response as { record: { id: string } }).record.id,
+    });
+    expect(inspect.ok).toBe(true);
+    expect((inspect.response as { record: { kind: string } }).record.kind).toBe("merge");
+    await expect(
+      fs.access(path.join(mocks.workspaceDir, "skills", "merged-source", "SKILL.md")),
+    ).rejects.toThrow();
   });
 
   it("scopes list and inspect to the resolved agent workspace", async () => {

@@ -565,8 +565,12 @@ const SkillProposalStatusSchema = Type.Union([
   Type.Literal("quarantined"),
   Type.Literal("stale"),
 ]);
-/** Skill proposal operation type: new skill or update to an existing skill. */
-const SkillProposalKindSchema = Type.Union([Type.Literal("create"), Type.Literal("update")]);
+/** Skill proposal operation type: new skill, update, or merged replacement. */
+const SkillProposalKindSchema = Type.Union([
+  Type.Literal("create"),
+  Type.Literal("update"),
+  Type.Literal("merge"),
+]);
 /** Scan state for proposed skill content before it can be applied. */
 const SkillProposalScanStateSchema = Type.Union([
   Type.Literal("pending"),
@@ -640,6 +644,19 @@ const SkillProposalTargetSchema = Type.Object(
   { additionalProperties: false },
 );
 
+/** Source skill captured by hash for a merge proposal. */
+const SkillProposalSourceTargetSchema = Type.Object(
+  {
+    skillName: NonEmptyString,
+    skillKey: NonEmptyString,
+    skillDir: NonEmptyString,
+    skillFile: NonEmptyString,
+    source: Type.Optional(NonEmptyString),
+    currentContentHash: Sha256String,
+  },
+  { additionalProperties: false },
+);
+
 /** Optional runtime origin tying a proposal back to an agent turn. */
 const SkillProposalOriginSchema = Type.Object(
   {
@@ -669,6 +686,7 @@ const SkillProposalRecordSchema = Type.Object(
     draftHash: NonEmptyString,
     supportFiles: Type.Optional(Type.Array(SkillProposalSupportFileSchema, { maxItems: 64 })),
     target: SkillProposalTargetSchema,
+    sources: Type.Optional(Type.Array(SkillProposalSourceTargetSchema, { minItems: 2 })),
     scan: SkillProposalScanSchema,
     goal: Type.Optional(Type.String()),
     evidence: Type.Optional(Type.String()),
@@ -763,6 +781,21 @@ export const SkillsProposalUpdateParamsSchema = Type.Object(
   { additionalProperties: false },
 );
 
+/** Creates a pending proposal that merges existing source skills into a new target skill. */
+export const SkillsProposalMergeParamsSchema = Type.Object(
+  {
+    agentId: Type.Optional(NonEmptyString),
+    targetName: NonEmptyString,
+    targetDescription: NonEmptyString,
+    sourceSkillNames: Type.Array(NonEmptyString, { minItems: 2 }),
+    content: SkillProposalContentString,
+    supportFiles: Type.Optional(Type.Array(SkillProposalSupportFileInputSchema, { maxItems: 64 })),
+    goal: Type.Optional(Type.String()),
+    evidence: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+);
+
 /** Replaces draft content/support files for an existing proposal. */
 export const SkillsProposalReviseParamsSchema = Type.Object(
   {
@@ -821,6 +854,7 @@ export const SkillsProposalApplyResultSchema = Type.Object(
   {
     record: SkillProposalRecordSchema,
     targetSkillFile: NonEmptyString,
+    changedTargets: Type.Optional(Type.Array(NonEmptyString)),
   },
   { additionalProperties: false },
 );

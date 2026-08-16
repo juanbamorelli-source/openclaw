@@ -13,12 +13,14 @@ import {
   resetSkillsRefreshStateForTest,
 } from "../runtime/refresh-state.js";
 import { writeSkill } from "../test-support/e2e-test-helpers.js";
+import { getSkillCuratorStatus } from "./curator.js";
 import { renderProposalMarkdown } from "./frontmatter.js";
 import {
   applySkillProposal,
   inspectSkillProposal,
   listSkillProposals,
   proposeCreateSkill,
+  proposeMergeSkill,
   proposeUpdateSkill,
   quarantineSkillProposal,
   readSkillProposalDraftDirectory,
@@ -587,6 +589,157 @@ describe("skill workshop proposals", () => {
       "---\nname: release-notes\ndescription: Draft release notes\n---\n\nChanged elsewhere.\n",
       "utf8",
     );
+
+    await expect(
+      applySkillProposal({ workspaceDir, proposalId: proposal.record.id }),
+    ).rejects.toThrow("proposal marked stale");
+    expect((await inspectSkillProposal(proposal.record.id))?.record.status).toBe("stale");
+  });
+
+  it("applies merge proposals by creating a combined target and retiring source skills", async () => {
+    const workspaceDir = await makeWorkspace();
+    const firstDir = path.join(workspaceDir, "skills", "weather-planning");
+    const secondDir = path.join(workspaceDir, "skills", "trip-weather");
+    await writeSkill({
+      dir: firstDir,
+      name: "weather-planning",
+      description: "Weather planning",
+      body: "# Weather Planning\n\nCheck weather first.\n",
+    });
+    await writeSkill({
+      dir: secondDir,
+      name: "trip-weather",
+      description: "Trip weather",
+      body: "# Trip Weather\n\nCheck route weather.\n",
+    });
+
+    const proposal = await proposeMergeSkill({
+      workspaceDir,
+      targetName: "travel-weather",
+      targetDescription: "Merged travel weather workflow",
+      sourceSkillNames: ["weather-planning", "trip-weather"],
+      content: "# Travel Weather\n\nCheck current, route, and alert conditions.\n",
+      supportFiles: [
+        {
+          path: "references/weather.md",
+          content: "Weather source details.\n",
+        },
+      ],
+    });
+
+    expect(proposal.record.kind).toBe("merge");
+    expect(proposal.record.sources?.map((source) => source.skillKey)).toEqual([
+      "weather-planning",
+      "trip-weather",
+    ]);
+    expect(
+      proposal.record.sources?.every((source) => /^[a-f0-9]{64}$/i.test(source.currentContentHash)),
+    ).toBe(true);
+
+    const beforeVersion = getSkillsSnapshotVersion(workspaceDir);
+    const applied = await applySkillProposal({
+      workspaceDir,
+      proposalId: proposal.record.id,
+    });
+
+    expect(applied.changedTargets).toEqual([
+      path.join(workspaceDir, "skills", "travel-weather", "SKILL.md"),
+      path.join(workspaceDir, "skills", "weather-planning", "SKILL.md"),
+      path.join(workspaceDir, "skills", "trip-weather", "SKILL.md"),
+    ]);
+    expect(getSkillsSnapshotVersion(workspaceDir)).toBeGreaterThan(beforeVersion);
+    await expect(fs.readFile(applied.targetSkillFile, "utf8")).resolves.toBe(
+      '---\nname: "travel-weather"\ndescription: "Merged travel weather workflow"\n---\n\n# Travel Weather\n\nCheck current, route, and alert conditions.\n',
+    );
+    await expect(
+      fs.readFile(
+        path.join(workspaceDir, "skills", "travel-weather", "references", "weather.md"),
+        "utf8",
+      ),
+    ).resolves.toBe("Weather source details.\n");
+
+    const lifecycleByFile = new Map(
+      getSkillCuratorStatus().skills.map((skill) => [skill.skillFile, skill]),
+    );
+    expect(lifecycleByFile.get(await fs.realpath(path.join(firstDir, "SKILL.md")))).toMatchObject({
+      state: "archived",
+      archivedReason: "merged into travel-weather",
+    });
+    expect(lifecycleByFile.get(await fs.realpath(path.join(secondDir, "SKILL.md")))).toMatchObject({
+      state: "archived",
+      archivedReason: "merged into travel-weather",
+    });
+    expect((await inspectSkillProposal(proposal.record.id))?.record.status).toBe("applied");
+  });
+
+  it("marks merge proposals stale when a source skill changes before apply", async () => {
+    const workspaceDir = await makeWorkspace();
+    const firstDir = path.join(workspaceDir, "skills", "source-one");
+    const secondDir = path.join(workspaceDir, "skills", "source-two");
+    await writeSkill({
+      dir: firstDir,
+      name: "source-one",
+      description: "First source",
+      body: "# Source One\n\nOriginal.\n",
+    });
+    await writeSkill({
+      dir: secondDir,
+      name: "source-two",
+      description: "Second source",
+      body: "# Source Two\n\nOriginal.\n",
+    });
+    const proposal = await proposeMergeSkill({
+      workspaceDir,
+      targetName: "source-combined",
+      targetDescription: "Combined source workflow",
+      sourceSkillNames: ["source-one", "source-two"],
+      content: "# Source Combined\n\nMerged.\n",
+    });
+
+    await fs.writeFile(
+      path.join(firstDir, "SKILL.md"),
+      "---\nname: source-one\ndescription: First source\n---\n\n# Source One\n\nChanged.\n",
+      "utf8",
+    );
+
+    await expect(
+      applySkillProposal({ workspaceDir, proposalId: proposal.record.id }),
+    ).rejects.toThrow("proposal marked stale");
+    expect((await inspectSkillProposal(proposal.record.id))?.record.status).toBe("stale");
+    await expect(
+      fs.access(path.join(workspaceDir, "skills", "source-combined", "SKILL.md")),
+    ).rejects.toThrow();
+  });
+
+  it("marks merge proposals stale when the target appears before apply", async () => {
+    const workspaceDir = await makeWorkspace();
+    await writeSkill({
+      dir: path.join(workspaceDir, "skills", "merge-left"),
+      name: "merge-left",
+      description: "Left source",
+      body: "# Merge Left\n\nOriginal.\n",
+    });
+    await writeSkill({
+      dir: path.join(workspaceDir, "skills", "merge-right"),
+      name: "merge-right",
+      description: "Right source",
+      body: "# Merge Right\n\nOriginal.\n",
+    });
+    const targetDir = path.join(workspaceDir, "skills", "merge-target");
+    const proposal = await proposeMergeSkill({
+      workspaceDir,
+      targetName: "merge-target",
+      targetDescription: "Merged target workflow",
+      sourceSkillNames: ["merge-left", "merge-right"],
+      content: "# Merge Target\n\nMerged.\n",
+    });
+
+    await writeSkill({
+      dir: targetDir,
+      name: "merge-target",
+      description: "Conflicting target",
+      body: "# Conflict\n",
+    });
 
     await expect(
       applySkillProposal({ workspaceDir, proposalId: proposal.record.id }),

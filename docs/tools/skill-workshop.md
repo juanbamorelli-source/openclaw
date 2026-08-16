@@ -1,14 +1,14 @@
 ---
-summary: "Create, update, and retire workspace skills through Skill Workshop review"
+summary: "Create, update, merge, and retire workspace skills through Skill Workshop review"
 read_when:
-  - You want the agent to create or update a skill from chat
+  - You want the agent to create, update, or merge a skill from chat
   - You need to review, apply, reject, or quarantine a generated skill draft
   - You are configuring Skill Workshop approval, autonomy, storage, or limits
 title: "Skill Workshop"
 sidebarTitle: "Skill Workshop"
 ---
 
-Skill Workshop is OpenClaw's governed path for creating and updating workspace
+Skill Workshop is OpenClaw's governed path for creating, updating, and merging workspace
 skills. Agents and operators never write `SKILL.md` directly through this
 path — they create a **proposal** (pending draft with content, target
 binding, scanner state, hashes, and rollback metadata) that becomes a live
@@ -26,11 +26,14 @@ new skill snapshots but keeps every skill file intact for an explicit restore.
   `SKILL.md`.
 - **Apply is the only live write:** create, update, and revise never change
   active skills.
+- **Merge stays proposal-first:** merge proposals create a new target skill and
+  retire named source skills only when applied.
 - **Workspace scoped:** creates target the workspace `skills/` root; updates
   are allowed only for writable workspace skills.
 - **No clobber:** create fails if the target skill already exists.
-- **Hash bound:** update proposals bind to the current target hash and go
-  `stale` if the live skill changes before apply.
+- **Hash bound:** update proposals bind to the current target hash. Merge
+  proposals bind to every source hash. Either goes `stale` if the live files
+  change before apply.
 - **Scanner gated:** apply reruns the security scanner before writing.
 - **Recoverable:** apply writes rollback metadata before touching live files.
 - **Consistent surfaces:** chat, CLI, and Gateway all call the same service.
@@ -38,12 +41,12 @@ new skill snapshots but keeps every skill file intact for an explicit restore.
 ## Lifecycle
 
 ```text
-create/update -> pending
-revise        -> pending
-apply         -> applied
-reject        -> rejected
-quarantine    -> quarantined
-target change -> stale
+create/update/merge -> pending
+revise              -> pending
+apply               -> applied
+reject              -> rejected
+quarantine          -> quarantined
+target/source change -> stale
 ```
 
 Only a `pending` proposal can be revised, applied, rejected, or quarantined.
@@ -110,6 +113,12 @@ Update an existing workspace skill:
 Update trip-planning to also check seat maps before booking.
 ```
 
+Merge existing workspace skills:
+
+```text
+Merge trip-planning and flight-check into travel-planning.
+```
+
 Iterate on a pending proposal:
 
 ```text
@@ -162,6 +171,11 @@ openclaw skills workshop propose-create \
 # Update an existing workspace skill
 openclaw skills workshop propose-update trip-planning --proposal ./PROPOSAL.md
 
+# Merge existing workspace skills into a new target skill
+openclaw skills workshop propose-merge travel-planning trip-planning flight-check \
+  --description "Merged travel planning workflow" \
+  --proposal ./PROPOSAL.md
+
 # List and inspect
 openclaw skills workshop list
 openclaw skills workshop inspect <proposal-id>
@@ -177,8 +191,9 @@ openclaw skills workshop quarantine <proposal-id> --reason "Needs security revie
 
 Every subcommand takes `--agent <id>` (target workspace; defaults to
 cwd-inferred, then the default agent) and `--json` (structured output).
-`propose-create`, `propose-update`, and `revise` also take `--goal <text>` and
-`--evidence <text>` to record proposal context alongside `--proposal`.
+`propose-create`, `propose-update`, `propose-merge`, and `revise` also take
+`--goal <text>` and `--evidence <text>` to record proposal context alongside
+`--proposal`.
 
 ## Proposal content
 
@@ -222,7 +237,7 @@ and paths outside the standard support folders.
 ## Agent tool
 
 The model uses `skill_workshop` with one required `action`:
-`create | update | revise | list | inspect | apply | reject | quarantine`.
+`create | update | merge | revise | list | inspect | apply | reject | quarantine`.
 Other parameters apply depending on the action:
 
 | Parameter                  | Used by                                              | Notes                                                                |
@@ -230,9 +245,12 @@ Other parameters apply depending on the action:
 | `name`                     | `create`, `inspect`, `revise`                        | Required for `create`; resolves a pending proposal by name otherwise |
 | `description`              | `create`, `update`, `revise`                         | Max 160 bytes                                                        |
 | `skill_name`               | `update`                                             | Existing skill name or key                                           |
-| `proposal_content`         | `create`, `update`, `revise`                         | Stored as `PROPOSAL.md`; capped by `skills.workshop.maxSkillBytes`   |
-| `support_files`            | `create`, `update`, `revise`                         | Array of `{ path, content }`                                         |
-| `goal`, `evidence`         | `create`, `update`, `revise`                         | Free-text context                                                    |
+| `target_name`              | `merge`                                              | New target skill name                                                |
+| `target_description`       | `merge`                                              | New target description, max 160 bytes                                |
+| `source_skill_names`       | `merge`                                              | At least two existing workspace skill names or keys                  |
+| `proposal_content`         | `create`, `update`, `merge`, `revise`                | Stored as `PROPOSAL.md`; capped by `skills.workshop.maxSkillBytes`   |
+| `support_files`            | `create`, `update`, `merge`, `revise`                | Array of `{ path, content }`                                         |
+| `goal`, `evidence`         | `create`, `update`, `merge`, `revise`                | Free-text context                                                    |
 | `proposal_id`              | `inspect`, `revise`, `apply`, `reject`, `quarantine` | Target proposal                                                      |
 | `reason`                   | `apply`, `reject`, `quarantine`                      | Optional                                                             |
 | `query`, `status`, `limit` | `list`                                               | Filter/paginate; `limit` max 50, default 20                          |
@@ -301,6 +319,7 @@ Proposal descriptions are always capped at 160 bytes, independent of
 | `skills.proposals.inspect`         | `operator.read`  |
 | `skills.proposals.create`          | `operator.admin` |
 | `skills.proposals.update`          | `operator.admin` |
+| `skills.proposals.merge`           | `operator.admin` |
 | `skills.proposals.revise`          | `operator.admin` |
 | `skills.proposals.requestRevision` | `operator.admin` |
 | `skills.proposals.apply`           | `operator.admin` |
