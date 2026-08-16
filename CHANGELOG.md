@@ -2,6 +2,12 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.7.1-7
+
+### Changes
+
+- **Skill Workshop merge proposals:** add merge proposal lifecycle support across service, CLI, agent tool, and Gateway RPC, creating a new combined skill while hash-checking and reversibly retiring source workspace skills.
+
 ## 2026.7.1-6
 
 ### Changes
