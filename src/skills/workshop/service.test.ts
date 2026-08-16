@@ -1,7 +1,8 @@
+import fsSync from "node:fs";
 // Workshop service tests cover skill workshop generation, storage, and validation behavior.
 import fs from "node:fs/promises";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createOpenClawTestState,
   type OpenClawTestState,
@@ -745,6 +746,64 @@ describe("skill workshop proposals", () => {
       applySkillProposal({ workspaceDir, proposalId: proposal.record.id }),
     ).rejects.toThrow("proposal marked stale");
     expect((await inspectSkillProposal(proposal.record.id))?.record.status).toBe("stale");
+  });
+
+  it("removes a created merge target and restores retired sources when source retirement fails", async () => {
+    const workspaceDir = await makeWorkspace();
+    const firstDir = path.join(workspaceDir, "skills", "rollback-left");
+    const secondDir = path.join(workspaceDir, "skills", "rollback-right");
+    await writeSkill({
+      dir: firstDir,
+      name: "rollback-left",
+      description: "Left rollback source",
+      body: "# Rollback Left\n\nOriginal.\n",
+    });
+    await writeSkill({
+      dir: secondDir,
+      name: "rollback-right",
+      description: "Right rollback source",
+      body: "# Rollback Right\n\nOriginal.\n",
+    });
+    const secondSkillFile = await fs.realpath(path.join(secondDir, "SKILL.md"));
+    const proposal = await proposeMergeSkill({
+      workspaceDir,
+      targetName: "rollback-merged",
+      targetDescription: "Merged rollback workflow",
+      sourceSkillNames: ["rollback-left", "rollback-right"],
+      content: "# Rollback Merged\n\nMerged.\n",
+    });
+
+    const originalExistsSync = fsSync.existsSync;
+    const existsSpy = vi.spyOn(fsSync, "existsSync").mockImplementation((filePath) => {
+      if (path.resolve(String(filePath)) === secondSkillFile) {
+        return false;
+      }
+      return originalExistsSync(filePath);
+    });
+    try {
+      await expect(
+        applySkillProposal({ workspaceDir, proposalId: proposal.record.id }),
+      ).rejects.toThrow("Workspace skill file is missing");
+    } finally {
+      existsSpy.mockRestore();
+    }
+
+    await expect(
+      fs.access(path.join(workspaceDir, "skills", "rollback-merged", "SKILL.md")),
+    ).rejects.toThrow();
+    const lifecycleByFile = new Map(
+      getSkillCuratorStatus().skills.map((skill) => [skill.skillFile, skill]),
+    );
+    expect(lifecycleByFile.get(await fs.realpath(path.join(firstDir, "SKILL.md")))).toMatchObject({
+      state: "active",
+      archivedReason: null,
+    });
+    const secondLifecycle = lifecycleByFile.get(
+      await fs.realpath(path.join(secondDir, "SKILL.md")),
+    );
+    expect(secondLifecycle?.state ?? "active").toBe("active");
+    expect(secondLifecycle?.archivedReason ?? null).toBe(null);
+    expect((await inspectSkillProposal(proposal.record.id))?.record.status).toBe("pending");
   });
 
   it("applies update proposals with rollback metadata", async () => {
