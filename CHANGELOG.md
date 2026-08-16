@@ -2,6 +2,12 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.7.1-6
+
+### Changes
+
+- **Skill Workshop owner commands:** add owner-only `/skill list`, `/skill apply`, `/skill reject`, `/skill quarantine`, `/skill retire`, and `/skill restore` commands so exact owner lifecycle decisions run before the model and reversible retirement keeps skill files intact.
+
 ## 2026.7.1-5
 
 ### Fixes
